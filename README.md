@@ -2,24 +2,39 @@
 
 > **Status: proposal, under review.** There is no code yet. This repository currently holds the design decision and the delivery plan for engineering review.
 
-context-brain is an open-source memory and context engine for AI assistants. It gives a person, a team or a whole organisation one shared "brain" that any AI tool can use: Claude, ChatGPT, Gemini, Cursor, coding agents and local models. Models can pull exactly the context they need, using as few tokens as possible. People can read, fix and delete everything in it with ordinary tools such as Obsidian, a web UI or git.
+context-brain is an open-source memory and context engine for AI assistants. Every person gets a **private brain**, and every team or organisation gets a **shared brain**. Any AI tool can use them: Claude, ChatGPT, Gemini, Cursor, coding agents and local models. The brains fill themselves as people work, models pull only the context they need, and people stay in control of everything they contribute.
 
 ## Why
 
 - **AI memory is locked to one vendor and one user.** Claude's memory, ChatGPT's memory and every IDE agent's memory are separate silos. Switching model, or working with a colleague, means starting over.
 - **Teams know things that no single chat holds.** That includes decisions, constraints, conventions, who owns what, and what changed last week. Today this knowledge is re-explained to every model in every session.
 - **Loading "everything" is expensive and makes answers worse.** A brain should hand a model about 1–2k tokens of the right facts, not a 40k-token wiki.
-- **The people the brain describes must be able to see and correct it.** That rules out black-box vector stores.
+- **Nobody will curate a knowledge base by hand.** The brain has to capture knowledge as a side effect of normal work.
+- **People won't adopt a brain that feels like surveillance.** Their personal context must be visibly theirs, and the group must only get what belongs to the group.
 
-## The proposal in one paragraph
+## The proposal in brief
 
-Store the brain as **fact-shaped markdown files**, one folder (vault) per context, using the open-source [Basic Memory](https://github.com/basicmachines-co/basic-memory) format and engine. Put a **thin gateway** in front of it, which is the part this project builds. The gateway is a remote MCP server with OAuth/OIDC, access control per context, and five small tools with a token budget. It also runs an **ingest pipeline** that turns raw notes into deduplicated, attributed facts. The small judgments that pipeline makes run through a swappable **judge interface**. These are questions such as "keep or drop?", "duplicate?", "superseded?" and "private?". TypeSafe's **Jev** decision model is the recommended judge, and an LLM judge ships so the project has no required proprietary dependency. The same container image serves a single person on a laptop, an organisation behind SSO, and anyone self-hosting it publicly; only the configuration differs.
+- **One principle decides what is shared.** Everything the brain learns is sorted into three categories, relative to the person who contributed it:
+  1. **Group:** definitely relevant to the group. It goes to the group brain automatically.
+  2. **Uncertain:** the author is asked for consent before it is shared.
+  3. **Private:** never leaves the author's personal brain.
+
+  Authors can edit or pull back anything they contributed to a group, at any time. No curator or approval queue sits in the flow.
+- **Capture as people work:**
+  - AI assistants save durable facts during normal sessions;
+  - documents and meeting notes are ingested;
+  - Slack channels connected to a group feed that group's brain.
+- **Personal brains are private from the operator.** Each one is isolated and encrypted with keys only its owner controls, inside the central deployment.
+- **Fact-shaped markdown** in the open-source [Basic Memory](https://github.com/basicmachines-co/basic-memory) format, so models get small, attributed facts within a token budget, and people can read and edit the same files.
+- **A thin gateway** is the part this project builds. It is a remote MCP server with OAuth/OIDC, six small tools, the ingest and classification pipeline, and encryption.
+- **Any decision model.** Classification runs through a pluggable decision-model interface. TypeSafe's **Jev** is the default; Cloudflare's open-weight **Clef**, an LLM or simple rules can be plugged in per judgment.
+- **One codebase, three hosting profiles:** a single person, an organisation behind SSO, and anyone self-hosting. Only the configuration differs.
 
 ## Documents
 
 | Document | What it covers |
 |---|---|
-| [docs/decision.md](docs/decision.md) | Requirements, the options we evaluated, the decision, the architecture, Jev's role, hosting profiles, risks, and the questions for reviewers |
+| [docs/decision.md](docs/decision.md) | The three-category principle, requirements, options evaluated, architecture (ingestion, encrypted personal brains, classification, decision models), hosting profiles, security, risks, and the questions for reviewers |
 | [docs/plan.md](docs/plan.md) | Phased delivery plan, go/no-go gates, the evaluation method, and the proposed repository layout |
 
 ## How to review

@@ -3,98 +3,124 @@
 | | |
 |---|---|
 | **Status** | Draft for engineering review |
-| **Date** | 2026-10-31 |
-| **Decision** | Build a thin open-source gateway and ingest pipeline on top of Basic Memory's markdown format, with a pluggable judge (Jev recommended) |
+| **Date** | 2026-11-01 |
+| **Decision** | Build a thin open-source gateway and ingest pipeline on Basic Memory's markdown format. Every person gets an encrypted personal brain; group brains are filled automatically under a three-category sharing principle. Decisions are made by a pluggable decision model, Jev by default. |
 | **Delivery plan** | [plan.md](plan.md) |
 
-*The landscape moves fast. Versions, prices and availability were checked in October 2026. Anything marked **(unverified)** comes from vendor or third-party claims we could not confirm.*
+*The landscape moves fast. Versions, prices and availability were checked in October and November 2026. Anything marked **(unverified)** comes from vendor or third-party claims we could not confirm.*
 
 ---
 
 ## 1. Summary
 
-- **What we decided:** we will not adopt an existing memory product, and we will not build an engine from scratch.
-  - We adopt **Basic Memory** (open source) as the storage format and index.
-    - It is plain markdown in which atomic facts and typed relations live inside the notes.
-    - So the same files serve models, people (in Obsidian or a web UI) and git.
-  - We build the part nobody provides properly: a **gateway**. It includes:
-    - **Identity and access:** OAuth 2.1 / OIDC sign-in and access control per context.
-    - **Five tools** with a token budget for models.
-    - An **ingest pipeline** that turns raw notes into deduplicated, attributed, time-bounded facts.
-- **Where Jev fits:** the ingest pipeline makes many small yes/no and pick-one judgments. Those go through a **judge interface**.
-  - **TypeSafe's Jev** is the recommended judge. It is a non-generative decision model that is cheap, fast and returns calibrated confidence.
-  - An **LLM judge** ships alongside it, so the project runs with no proprietary dependency.
-- **Hosting:** one container image and one configuration schema cover three hosting profiles:
-  - **Personal:** one person.
-  - **Organisation:** SSO, many contexts and teams.
-  - **Community:** anyone self-hosting.
-- **Go/no-go gate:** after the first phase we compare against the managed alternatives on the same evaluation set, before we commit to the larger build.
+- **What it is:** a memory and context engine that gives every person a **private brain** and every group a **shared brain**. Any MCP-capable AI client can use both, within a token budget.
+- **The foundational principle (§2):** every piece of information is sorted into one of three categories:
+  - **Group:** definitely relevant to the group. It goes to the group brain automatically.
+  - **Uncertain:** we don't know. The author is asked for consent before it is shared.
+  - **Private:** definitely personal. It never leaves the person's brain.
 
-## 2. Problem and goals
+  The original author can edit or pull back anything they contributed to a group, at any time. No curator or review queue sits in the flow, because the brain is only valuable if it fills itself as people work.
+- **Capture as people work.** The main inputs are:
+  - AI assistants saving durable facts during normal sessions;
+  - documents and meeting notes people provide;
+  - Slack channels connected to a group.
+- **Personal brains** are part of the central deployment but **isolated and encrypted with keys only the person controls**, so the operating organisation cannot read them at rest or in backups (§7.3 sets out exactly what is and isn't guaranteed).
+- **Build vs adopt:** we adopt **Basic Memory** (open source) as the storage format and engine, and build a **gateway** around it. The gateway provides:
+  - identity, isolation and encryption
+  - six model-facing tools with a token budget
+  - the ingest and classification pipeline
+  - deploy recipes for personal, organisation and community hosting.
+- **Decision model:** every classification goes through a **decision-model interface**. **Jev** is the default; Clef, any compatible decision API, an LLM or simple rules can be plugged in per judgment.
+- **Go/no-go gate** after phase 1. The gate is mostly about whether automatic classification is accurate enough to trust ([plan, Gate 1](plan.md#gate-1-is-automatic-classification-trustworthy)).
+
+## 2. Foundational principle: three categories of information
+
+Everything the brain learns is about someone and was contributed by someone. Before it is stored, every item is placed in exactly one category **relative to the person who contributed it (the author)**.
+
+| Category | Meaning | What happens | Author's control |
+|---|---|---|---|
+| **1. Group** | Definitely relevant to a group the author belongs to, and not personal or sensitive | Goes to that group's brain **automatically**, attributed to the author | Notified in a digest; can edit or retract at any time |
+| **2. Uncertain** | Might belong to a group, might be private | Stored in the author's **personal** brain, and the author is **asked for consent** to share it | Yes → becomes a group item (category 1 rules apply from then on). No or no answer → stays private. |
+| **3. Private** | Definitely personal or sensitive | Stored only in the author's personal brain. **Never** shared, never suggested. | Full control in their personal brain |
+
+**Rules that follow from the principle:**
+
+1. **When in doubt, move towards private.** Classification errors must fail safe:
+   - unsure between 1 and 2 → choose 2;
+   - unsure between 2 and 3 → choose 3.
+
+   Thresholds are deliberately asymmetric (§7.6).
+2. **Category 3 rules beat category 1 rules.** If a sensitivity rule fires, nothing else can push the item into a group, not even an explicit instruction. In that case the author is told why.
+3. **The author always keeps control of their contribution.** Editing a group item they authored, or retracting it, takes effect immediately in the group brain and its index. If another author independently asserted the same fact, it stays under that author's name.
+4. **No human gatekeeper.** There are no curators, approval queues or review steps between a contribution and the group brain. The only human decision in the flow is the author's consent for category 2.
+5. **Every decision is explainable.** Each item records its category, the rule or rubric scores that put it there, and the decision model that scored it. Authors can see why something was shared.
+
+The rest of the design (capture, storage, encryption, classification, tools and metrics) is built around these rules.
+
+## 3. Problem and goals
 
 AI assistants now do real work, but the context they work from is fragmented:
 
-- Each vendor's memory is **per user and per product**. Nothing written in one tool is visible to another tool or to a colleague.
-- **Group knowledge has no home that models can read.** This means decisions, constraints, conventions, owners and recent changes. People re-explain it in prompts, paste docs, or let each agent rediscover it.
-- The common workaround is to load a whole wiki or a long `CLAUDE.md`, which is **token-expensive**. Long contexts also measurably hurt answer quality.
-- Vector-store memories are **opaque**. The people a memory describes can't easily see, correct or delete it.
+- Each vendor's memory is **per user and per product**. Nothing learned in one tool is visible to another tool or to a colleague.
+- **Group knowledge has no home that models can read.** This means decisions, constraints, conventions, owners and recent changes. People re-explain it in prompts, or each agent rediscovers it.
+- Loading a whole wiki or a long `CLAUDE.md` is **token-expensive** and hurts answer quality.
+- **Nobody will curate a brain by hand.** Knowledge bases decay because maintaining them is extra work. The brain has to fill and tidy itself while people work.
+- **People won't adopt a brain that feels like surveillance.** Their personal context must be visibly theirs.
 
 **Goals:**
-- One brain per person and per group, usable from any MCP-capable AI client.
+- One private brain per person and one shared brain per group, usable from any MCP-capable AI client.
+- Capture happens as a side effect of normal work, with no curation step.
 - Models retrieve small, relevant, attributed facts within a stated token budget.
-- People own the content: they can read it, edit it, delete it and export it as plain files.
-- It works for one person, for a team, and for an organisation of hundreds, without forking the code.
+- People own their contributions: they can read, edit, retract and export them.
+- It works for one person, a team, and an organisation of hundreds, without forking the code.
 
 **Non-goals for v1:**
 - A hosted multi-tenant SaaS. The design must not block one, but we are not building it.
 - A chat UI or agent framework. The brain is a service that other tools call.
-- Replacing document systems such as Notion, Confluence or Google Drive. They can be *sources* for ingest later.
-- Automatic capture from every system (Slack, email, meetings) in v1.
+- Reading email, direct messages or whole-workspace data. Capture is limited to the channels in §7.
 
-## 3. Requirements
+## 4. Requirements
 
-R1–R6 are must-haves. R7–R9 are strong preferences.
+R1–R7 and R10 are must-haves. R8–R9 are strong preferences.
 
 | # | Requirement | What "good" looks like |
 |---|---|---|
-| R1 | **Group brain** | Many people feed one brain that builds up facts about the group. Every fact records who asserted it and where it came from. |
-| R2 | **One brain per person, any AI** | The same brain from Claude (web, desktop, mobile, Code), ChatGPT, Gemini, Cursor, other coding agents and local models, across sessions. |
-| R3 | **Built for models, token-cheap** | A model pulls only what it needs: facts of about 20–40 tokens first, then the entity, then the source section. Every lookup has a token budget. The tool definitions themselves stay small. |
-| R4 | **Human interface to the whole brain** | Browse, organise, edit and delete everything, in Obsidian or a web UI. Edits and deletes reach the search index. |
-| R5 | **Isolated, selectable contexts** | Contexts such as `personal`, `team-payments` or `org-handbook`. A session attaches one or several. Who can read or write each context is **enforced**, not just tagged. |
-| R6 | **Open and portable** | Open-source code; data is plain files the owner can export. No required proprietary service. |
-| R7 | **Absorbs and maintains facts** | Captures facts from conversations and documents, removes duplicates, marks superseded or disputed facts, and keeps valid-from/to dates. |
-| R8 | **Privacy and control** | Self-hostable; real deletion; no training on the data; sensitive content is kept out of shared contexts. |
-| R9 | **Deployable at three scales** | Personal, organisation and community deployments from the same code, differing only in configuration: identity provider, storage and sync, judge and LLM providers. |
+| R1 | **Group brain** | Many people feed one brain that builds up facts about the group. Every fact records its author and source. |
+| R2 | **One brain per person, any AI** | The same personal brain and group brains from Claude (web, desktop, mobile, Code), ChatGPT, Gemini, Cursor, other coding agents and local models. |
+| R3 | **Built for models, token-cheap** | Facts of about 20–40 tokens first, then the entity, then the source section. Every lookup has a token budget, and the tool definitions stay small. |
+| R4 | **Human interface** | People can browse, edit and retract what they contributed, and browse what their groups know, in a web UI or Obsidian. Edits and retractions reach the search index. |
+| R5 | **Isolated, selectable contexts** | Each person has a personal brain, plus group contexts such as `team-payments` or `org-handbook`. A session attaches one or several. Access is **enforced**, not tagged. |
+| R6 | **Open and portable** | Open-source code; data is plain markdown that can be exported. No required proprietary service. |
+| R7 | **Captures as people work** | AI sessions, provided documents, meeting notes and Slack channels feed the brain without a curation step. Duplicates are merged, and superseded or disputed facts are marked. |
+| R8 | **Three-category sharing** | Every item is classified as group, uncertain or private (§2). Group items flow automatically, uncertain ones need consent, and private ones never move. Sensitive data never reaches a group. |
+| R9 | **Deployable at three scales** | Personal, organisation and community deployments from the same code, differing only in configuration. |
+| R10 | **Personal brains are private from the operator** | Personal brains are encrypted with keys only the person controls; the organisation cannot read them at rest or in backups. |
 
-## 4. What the research says
+## 5. What the research says
 
-### 4.1 Token efficiency (R3)
+### 5.1 Token efficiency
 
 - **Benchmarks mostly come from vendors, and they disagree.** For example:
   - Mem0's paper on LoCoMo: full context scored 72.9% at about 26k tokens per query; Mem0 scored 66.9% at about 1.8k; Zep scored 66.0% at about 3.9k.
   - Letta's plain agent with file tools over the raw text scored 74%.
   - The independent MemDelta benchmark found verbatim retrieval close to full context (47.2% vs 49.8%). Changing only the embedding model moved accuracy by 6 points.
-- **Takeaway:** simple retrieval over the original text, split into sections, is a strong baseline. LLM fact extraction adds cost and errors. Adopt it only where our own evaluation shows a gain.
+- **Takeaway:** simple retrieval over the original text, split into sections, is a strong baseline. Fact extraction adds cost and errors. Adopt it where our own evaluation shows a gain, and always keep the source alongside the fact.
 - **What actually cuts tokens:**
-  - **Small retrieval units.** A fact is about 20–40 tokens; a section is about 300–900.
-  - **Section-level reads instead of whole pages.** One published test of an LLM wiki measured 37k tokens to load everything versus 1.9k through section search and reads (author's own numbers).
-  - **Hybrid search.** Keyword (BM25) plus vector search, merged and reranked.
-  - **A hard token budget per lookup**, filled in rank order.
-  - **Progressive disclosure:** a small always-loaded profile, then an outline, then a section, then the page.
-  - **Few, short tool definitions.** Each tool definition costs roughly 140–320 tokens of context (unverified).
+  - small retrieval units (a fact is about 20–40 tokens)
+  - section-level reads instead of whole pages
+  - hybrid keyword and vector search with reranking
+  - a hard token budget per lookup
+  - progressive disclosure: profile, then outline, then section, then page
+  - few, short tool definitions.
 
-### 4.2 Facts and graphs versus wiki prose
-
-The question was whether facts stored as a graph beat wiki pages on tokens and speed.
+### 5.2 Facts and graphs versus wiki prose
 
 - **A graph is not automatically better.** *Does Memory Need Graphs?* (ACL 2026) found:
   - Graphs help only when they are built well. Entity nodes with descriptions helped; edges based on similarity hurt.
   - Matching a query to entities beats matching it to triples.
-  - Following links one hop out adds noise unless the results are reranked.
   - Keeping the raw text **alongside** the extracted facts improved retrieval.
   - Building the graph took about 7× longer than a flat index.
-- **Token cost depends on the design, not on using a graph.** Per query:
+- **Token cost depends on the design.** Per query:
 
   | System | Tokens per query |
   |---|---|
@@ -102,142 +128,199 @@ The question was whether facts stored as a graph beat wiki pages on tokens and s
   | LightRAG | 5k–100k |
   | Microsoft GraphRAG (global) | ~330k |
 
-- **What a fact layer does buy:**
-  - entity-centric access ("everything about the Orders API")
-  - multi-step questions
-  - time validity
-  - duplicate and conflict detection.
-- **Conclusion: keep markdown, but make it fact-shaped.** Basic Memory already stores observations (`- [category] fact #tag`) and typed relations (`- depends_on [[Ledger Service]]`) inside ordinary notes. So the graph *is* the markdown, and people can edit it.
+- **Conclusion: keep markdown, but make it fact-shaped.** Basic Memory stores observations (`- [category] fact #tag`) and typed relations (`- depends_on [[Ledger Service]]`) inside ordinary notes. So the graph *is* the markdown, and people can edit it.
 
-### 4.3 Human interface (R4)
+### 5.3 Human interface
 
-- **Obsidian is the best editor for markdown vaults.** It has backlinks, a graph view and mobile apps, plus an official headless sync client for servers.
-  - It has **no access control inside a vault**. So the unit of isolation must be **one vault per context**, and the gateway's access-control list maps onto those vaults.
-- **For organisations, git per context is the natural sync and audit layer.** Obsidian Sync or Relay fits small groups, and a web UI serves people who won't use Obsidian.
-- **Deletes must reach the index.** It is unverified whether deleting a note in Obsidian also removes it from Basic Memory's search index. It gets tested in phase 1, with a scheduled reconcile as a backstop.
+- **Obsidian is the best editor for markdown vaults,** but it has **no access control inside a vault**. So the unit of isolation is one vault per context, with the gateway enforcing access.
+- **A web UI is required anyway.** Personal brains are encrypted (§8.2), so most people will see "what I contributed, where it went, and why" in a web UI. Obsidian remains available for group contexts and for power users.
 
-### 4.4 Client reach (R2)
+### 5.4 Client reach
 
-- **Remote MCP over HTTPS with OAuth 2.1** is the one surface that every major client now accepts:
-  - claude.ai: org connectors on Team and Enterprise.
-  - ChatGPT: Business and Enterprise; Plus is unclear.
-  - Gemini: currently personal accounts in the US.
-  - Also Cursor, Claude Code, Gemini CLI, Open WebUI and LibreChat.
-- **No client recalls memory automatically.** Each needs a short instruction ("call `profile` then `recall` first"), or a session-start hook where the harness supports one (Claude Code does).
+- **Remote MCP over HTTPS with OAuth 2.1** is the one surface that every major client accepts: claude.ai, ChatGPT (Business and Enterprise), Gemini, Cursor, Claude Code, Gemini CLI, Open WebUI and LibreChat.
+- **Clients don't save or recall on their own.** Each needs a short instruction ("call `profile` and `recall` first; call `remember` when you learn something durable"), or a hook where the harness supports one (Claude Code does).
 
-## 5. Options compared
+### 5.5 Decision models
 
-Key: ● meets · ◐ partly or needs work · ○ no · ? unknown
+Two non-generative decision models now exist. They take *state* plus typed questions and return probabilities, not text.
 
-| Option | Kind | R1 Group | R2 Any AI | R3 Tokens | R4 Human UI | R5 Contexts | R6 Open | R7 Facts | R8 Privacy | Verdict |
-|---|---|---|---|---|---|---|---|---|---|---|
-| **Basic Memory (self-hosted)** | OSS (AGPL), markdown + graph | ◐ no auth/ACL | ◐ needs OAuth front | ● observations, section reads with `max_tokens` | ● Obsidian | ◐ projects, no ACL | ● | ◐ format, no extractor | ● | **Base layer** |
-| Basic Memory Cloud/Teams | Commercial, ~$15–19/seat | ● roles per project | ● | ● | ◐ web UI; local deletes don't sync | ● | ◐ same files | ◐ | ◐ hosted | Managed fallback, low lock-in |
-| mcp-memory-service | OSS (Apache) | ◐ tags | ● OAuth + DCR | ◐ | ◐ dashboard | ◐ tags only | ● | ◐ | ● | Quick prototype |
-| Memlord | OSS (AGPL), very small | ● shared workspaces | ● OAuth 2.1 | ◐ | ◐ | ● | ● | ◐ | ● | Gateway reference |
-| Hindsight | OSS (MIT) | ◐ bearer key | ◐ no OAuth | ● budgeted recall | ○ opaque store | ● | ◐ Postgres | ● | ● | Best engine, fails R4 |
-| Graphiti / Zep | OSS (Apache), temporal graph | ○ no isolation | ◐ no auth | ● facts as edges | ○ | ◐ group id | ◐ Neo4j | ● valid-from/to | ● | Copy its fact model |
-| Cognee | OSS (Apache), knowledge graph | ● multi-tenant | ◐ | ◐ | ○ | ● | ◐ heavy | ● | ● | Too heavy |
-| Mem0 | OSS (Apache) | ◐ | ○ no MCP self-hosted | ● ~1.8k/query | ○ | ◐ | ◐ | ● | ● | Avoid |
-| HippoRAG 2 | Research code | ○ | ○ | ● ~1k/query | ○ | ○ | ● | ● | ● | Borrow retrieval idea |
-| qmd | OSS (MIT), search | ○ | ◐ no auth | ● hybrid + rerank | ● | ◐ | ● | ○ | ● | Search component |
-| LLM-wiki tools (Karpathy pattern) | OSS | ○ | ◐ | ○ index + whole pages | ● | ◐ | ● | ◐ ingest/lint | ● | Borrow layout and lint |
-| flow (Facets) | OSS (MIT), alpha | ○ single user | ◐ Claude Code/Codex | ◐ | ◐ terminal | ◐ | ● | ◐ scoop + sweep | ● local | Borrow capture ideas |
-| Outline / Docmost | Self-hosted wiki + MCP | ● | ● | ◐ page-level | ● | ● permissions | ◐ DB storage | ○ | ● | Alternative UI |
-| Supermemory | Commercial | ● spaces | ● MCP + extension | ◐ vendor claims | ◐ web app | ● | ○ closed | ● | ◐ | Best managed product |
-| MemoryPlugin, Plurality Context Flow | Commercial | ◐ | ● many platforms | ◐ | ◐ | ● | ○/◐ | ◐ | ◐ | Not for orgs |
-| Notion MCP + memory | Commercial | ◐ memories per user | ◐ | ◐ | ● | ● | ◐ proprietary | ◐ | ◐ | Only if already on Notion |
-| Vendor-native memory (Claude, ChatGPT) | Built in | ◐ | ○ one vendor | ◐ | ◐ | ◐ | ○ | ◐ | ◐ | Stopgap only |
+| | Jev (TypeSafe) | Clef (Cloudflare) |
+|---|---|---|
+| Released | Early access since Sep 2026 | 1 Oct 2026 |
+| Weights | Hosted only | Open weights, Apache-2.0 (Clef and Clef-flash), also hosted on Workers AI |
+| Question types | Probability that a statement is true ("Noul"), choice, score | Same; Cloudflare describes it as Jev-API compatible |
+| Context | 32k tokens of state per question | 64k |
+| Price | $0.042 per million input tokens, output free | Hosted pricing not stated; free to self-host |
+| Speed (vendor numbers) | 524 ms median | 209 ms (Clef), 39 ms (Clef-flash) median |
+
+All performance figures are each vendor's own **(unverified)**. Because both share a request shape, one adapter can serve both (§7.7).
+
+### 5.6 Slack
+
+- Slack's API terms restrict LLM training, bulk export and persistent indexes for apps **distributed to other organisations**. Since mid-2025, those apps also face tight rate limits on reading channel history.
+- **Internal, customer-built apps are not affected by the rate limits.** An app used only inside its own workspace falls outside the third-party data restrictions. The terms imply this rather than stating it for every clause.
+- **Therefore:** each deployment installs **its own internal Slack app** in its own workspace. A hosted multi-tenant offering would need to go through the Slack Marketplace, which is another reason it is a non-goal.
+
+## 6. Options compared
+
+Key: ● meets · ◐ partly or needs work · ○ no · ? unknown. None of the existing options meets R8 or R10, so those columns are left out of the table.
+
+| Option | Kind | R1 Group | R2 Any AI | R3 Tokens | R4 Human UI | R5 Contexts | R6 Open | R7 Capture | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| **Basic Memory (self-hosted)** | OSS (AGPL), markdown + graph | ◐ no auth/ACL | ◐ needs OAuth front | ● observations, section reads with `max_tokens` | ● Obsidian | ◐ projects, no ACL | ● | ◐ format, no extractor | **Base layer** |
+| Basic Memory Cloud/Teams | Commercial, ~$15–19/seat | ● roles per project | ● | ● | ◐ | ● | ◐ same files | ◐ | Managed option; fails R10 |
+| mcp-memory-service | OSS (Apache) | ◐ tags | ● OAuth + DCR | ◐ | ◐ dashboard | ◐ tags | ● | ◐ | Quick prototype |
+| Memlord | OSS (AGPL), very small | ● shared workspaces | ● OAuth 2.1 | ◐ | ◐ | ● | ● | ◐ | Gateway reference |
+| Hindsight | OSS (MIT) | ◐ bearer key | ◐ no OAuth | ● budgeted recall | ○ opaque store | ● | ◐ Postgres | ● | Best engine, fails R4 |
+| Graphiti / Zep | OSS (Apache), temporal graph | ○ no isolation | ◐ no auth | ● facts as edges | ○ | ◐ | ◐ Neo4j | ● valid-from/to | Copy its fact model |
+| Cognee | OSS (Apache), knowledge graph | ● multi-tenant | ◐ | ◐ | ○ | ● | ◐ heavy | ● | Too heavy |
+| Mem0 | OSS (Apache) | ◐ | ○ no MCP self-hosted | ● ~1.8k/query | ○ | ◐ | ◐ | ● | Avoid |
+| HippoRAG 2 | Research code | ○ | ○ | ● ~1k/query | ○ | ○ | ● | ● | Borrow retrieval idea |
+| qmd | OSS (MIT), search | ○ | ◐ no auth | ● hybrid + rerank | ● | ◐ | ● | ○ | Search component |
+| LLM-wiki tools (Karpathy pattern) | OSS | ○ | ◐ | ○ index + whole pages | ● | ◐ | ● | ◐ ingest/lint | Borrow layout and lint |
+| flow (Facets) | OSS (MIT), alpha | ○ single user | ◐ Claude Code/Codex | ◐ | ◐ terminal | ◐ | ● | ◐ capture during and after sessions | Borrow capture ideas |
+| Outline / Docmost | Self-hosted wiki + MCP | ● | ● | ◐ page-level | ● | ● permissions | ◐ DB storage | ○ | Alternative UI |
+| Supermemory | Commercial | ● spaces | ● MCP + extension | ◐ vendor claims | ◐ web app | ● | ○ closed | ● | Best managed product; fails R6, R10 |
+| MemoryPlugin, Plurality Context Flow | Commercial | ◐ | ● many platforms | ◐ | ◐ | ● | ○/◐ | ◐ | Not for orgs |
+| Notion MCP + memory | Commercial | ◐ memories per user | ◐ | ◐ | ● | ● | ◐ proprietary | ◐ | Only if already on Notion |
+| Vendor-native memory (Claude, ChatGPT) | Built in | ◐ | ○ one vendor | ◐ | ◐ | ◐ | ○ | ◐ | Stopgap only |
 
 **Ruled out:**
 - Letta and Khoj: agents, not memory layers. We borrow Letta's "core memory block" idea for `profile`.
-- MemOS, memU, Memobase, A-Mem, LangMem, the reference MCP memory server: research projects, focused on coding, stalled, or toys.
+- MemOS, memU, Memobase, A-Mem, LangMem, the reference MCP memory server: research projects, coding-focused, stalled, or toys.
 - Zep and Mem0 cloud APIs: developer APIs, not a brain people can edit.
-- Discontinued or churning consumer products.
 
 **Realistic directions:**
 
 | Direction | Build effort | Must-haves met | Main risk | Lock-in |
 |---|---|---|---|---|
-| **A. Open source + thin build (chosen)** | A gateway, an ingest pipeline and deploy recipes | All, once built | We own security and uptime; extraction quality is on us | None: markdown in git |
-| B. Basic Memory Cloud/Teams | Near zero | R1–R5; R6 partly | Pricing and plan changes; a single vendor | Low: same files |
-| C. Supermemory | Near zero | R1, R2, R5; R3/R4 partly | Closed engine; export unclear | High |
+| **A. Open source + thin build (chosen)** | A gateway, an ingest and classification pipeline, encryption, connectors, deploy recipes | All, once built | We own security and uptime; classification quality is on us | None: markdown in git |
+| B. Basic Memory Cloud/Teams | Near zero | R1–R5; R6 partly; not R8 or R10 | No three-category sharing; vendor can read data | Low: same files |
+| C. Supermemory | Near zero | R1, R2, R5 | Closed engine; no R8 or R10 | High |
 
-A is the only direction that meets every must-have while keeping the data in the owner's hands. B uses the same files, so starting with A never closes off B.
-
-## 6. Decision
-
-1. **Storage format:** fact-shaped markdown in Basic Memory's format, **one vault per context**, versioned in git.
-2. **Engine:** Basic Memory 1.x as the index and section reader. We run it **unmodified, as a separate process**, behind a narrow storage adapter. That keeps AGPL obligations clean (see §10) and leaves room for another engine later.
-3. **What we build:**
-   - the **gateway**: authentication, access control per context, five tools with a budget, attribution, audit
-   - the **ingest pipeline**: a single writer per context that extracts, dedupes, supersedes and lints
-   - **deploy recipes** for three hosting profiles.
-4. **Judge interface:** every non-generative decision in the gateway goes through one interface.
-   - **Jev is the recommended provider.**
-   - An LLM provider and a local-model provider ship too.
-   - Deployments choose a provider per judgment.
-5. **Go/no-go gate** after phase 1: compare against B and C on the same evaluation set before building beyond the prototype.
+Only A meets the three-category principle and the personal-privacy requirement.
 
 ## 7. Architecture
 
+### 7.1 Overview
+
 ```mermaid
 flowchart TB
-  subgraph Clients["AI clients (remote MCP over HTTPS)"]
-    C1[Claude apps & Claude Code]
-    C2[ChatGPT]
-    C3[Gemini / Gemini CLI]
-    C4[Cursor, Codex, other agents]
-    C5[Open WebUI / LibreChat + local models]
+  subgraph Sources["Ways in"]
+    S1[AI sessions:<br/>remember + end-of-session sweep]
+    S2[Documents & meeting notes<br/>upload, drop folder, connected folder]
+    S3[Slack channels<br/>internal app, mapped to a group]
   end
 
   subgraph Gateway["context-brain gateway (this project)"]
-    AUTH[OAuth 2.1 / OIDC<br/>identity → contexts ACL]
-    TOOLS[5 tools: profile · recall · read · outline · remember]
+    AUTH[OAuth 2.1 / OIDC<br/>identity, group membership]
+    TOOLS[6 tools: profile · recall · read · outline · remember · update]
     PACK[Budget packer<br/>facts → entity → section]
-    AUDIT[Audit log & token metering]
+    KEYS[Personal key service<br/>unlock per session]
   end
 
-  subgraph Ingest["Ingest pipeline (single writer per context)"]
-    EXT[Extract facts & relations<br/>LLM]
-    JUDGE{{Judge interface<br/>Jev · LLM · local}}
-    REV[Review queue<br/>for low-confidence decisions]
+  subgraph Pipeline["Ingest & classification"]
+    SCAN[Secret scan<br/>secrets refused]
+    EXT[Extract facts<br/>LLM]
+    CLS{{Three-category classifier<br/>rules → decision model → thresholds}}
+    MAINT[Maintain group facts<br/>dedupe · supersede · dispute]
   end
 
-  subgraph Store["Contexts = vaults (source of truth)"]
-    V1[(personal/)]
-    V2[(team-x/)]
-    V3[(org-handbook/)]
+  DM[(Decision-model interface<br/>Jev default · Clef · LLM · rules)]
+
+  subgraph Store["Storage"]
+    P[(Personal brains<br/>one vault per person,<br/>encrypted, person-held keys)]
+    G[(Group brains<br/>one vault per group, git)]
   end
 
   ENGINE[Basic Memory engine<br/>index, search, section reads]
-  HUMAN[People: Obsidian · web UI · git]
+  UI[Web UI · Obsidian · git]
 
-  Clients --> AUTH --> TOOLS --> PACK --> ENGINE
-  TOOLS -- remember --> INBOX[inbox/ per context]
-  INBOX --> EXT --> JUDGE --> Store
-  JUDGE -. unsure .-> REV --> HUMAN
-  ENGINE --- Store
-  HUMAN <--> Store
-  PACK -. optional rerank .-> JUDGE
+  Sources --> SCAN --> EXT --> CLS
+  TOOLS -- remember --> SCAN
+  CLS -- "1 group" --> MAINT --> G
+  CLS -- "2 uncertain (ask)" --> P
+  CLS -- "3 private" --> P
+  CLS -.-> DM
+  MAINT -.-> DM
+  AUTH --> TOOLS --> PACK --> ENGINE
+  KEYS --> P
+  ENGINE --- P
+  ENGINE --- G
+  UI <--> Store
 ```
 
-**Key rule:** models never write to the curated files directly. `remember` appends to the context's `inbox/`. A single ingest worker per context promotes inbox items into entity notes, so concurrent writers can't corrupt the vault, and every change is a reviewable git commit. People can edit curated files at any time; the ingest worker treats their edits as authoritative.
+### 7.2 Ways in (ingestion)
 
-### 7.1 Vault layout and note format
+**The aim is to capture as much as possible as people work, with no extra effort.** Every way in feeds the same pipeline: secret scan, fact extraction, three-category classification, then storage.
+
+| Way in | How it works | Priority | On by default |
+|---|---|---|---|
+| **AI saves as it works** ("scoop") | The model calls `remember` whenever a durable fact comes up: a decision, constraint, preference, owner or change. The client instruction or hook tells it to do this proactively. Each save returns a short receipt the model can show. | **Primary** | Yes |
+| **Documents and meeting notes** | Upload in the web UI, drop into a context's `raw/` folder, or connect a folder (e.g. a Drive folder where meeting transcripts land). Facts are extracted and the source is kept, so answers can cite it. | **Primary** | Yes for uploads; connected folders are switched on per group |
+| **Slack channels** | The deployment's internal Slack app reads the channels it is **invited to**. Each channel maps to one group context. | **Primary** | Per channel, switched on by inviting the app |
+| **"Remember this"** | The person asks explicitly, optionally naming a group ("remember for team-payments"). | Supporting | Yes |
+| **End-of-session sweep** | When a session ends, the transcript is re-read for facts the model didn't save. This works where the harness exposes it (e.g. Claude Code hooks); elsewhere the person uploads it. | Supporting | Per person, opt-in |
+| **Direct edits** | Edits in the web UI, in Obsidian (group contexts) or in git. Treated as authoritative; only the secret scan runs. | Supporting | Yes |
+| **API and CLI** | For automation, such as a build pipeline posting release notes. Uses a service identity limited to one group. | Supporting | No, needs a key |
+
+**Never ingested:** email, Slack direct messages and private channels the app isn't invited to, anything from a workspace-wide crawl, and AI chat histories the person didn't send.
+
+**Who is the author** decides which personal brain an item belongs to, and who can retract it:
+
+| Source | Author |
+|---|---|
+| AI session, "remember this", sweep | The signed-in person |
+| Uploaded document | The uploader |
+| Meeting notes | The person who uploaded or connected them. Statements attributed to a speaker in the notes are also tagged with that speaker, who can retract them. |
+| Slack message | The message's sender |
+| API | The service identity, owned by the group |
+
+**Group sources are handled slightly differently.** Slack channels, meeting folders connected to a group, and documents dropped into a group context already have a defined audience: that group. For these, the classifier doesn't ask whether something is group or personal. It only removes **category 3** content (sensitive or personal) and noise. Category 3 content from a group source is **discarded**, not stored in anyone's personal brain.
+
+### 7.3 Personal brains: isolation and encryption
+
+Every person gets a personal brain inside the central deployment. It is fully isolated and controlled only by them.
+
+**Isolation:**
+- One vault per person.
+- Only that person's identity can read or write it. There is no admin role over personal brains, and no "view as user" feature.
+- Group membership never grants access to a personal brain.
+
+**Encryption**, based on keys the person holds:
+- **Keys.** Each person has an encryption key pair. The private key is wrapped (encrypted) by a key only the person can produce: a passkey (via the WebAuthn PRF extension) or a passphrase. There is also a **recovery key** the person stores themselves. The organisation's key management never holds an unwrapped copy.
+- **Writes without unlocking.** New personal items (category 2 and 3) are encrypted to the person's **public** key as they arrive, so capture keeps working while the person is offline.
+- **Reads and maintenance need an unlock.** When the person connects a client, the OAuth sign-in includes an unlock step, and the client's token carries the key needed to unwrap their private key for that session. On the server, the personal vault and its index are decrypted **only in memory**, only while a session is active, and only in an engine instance dedicated to that person. Pending personal items are processed at the same time (dedupe, consent prompts).
+- **At rest and in backups:** ciphertext only. This includes the search index, which is kept encrypted per person.
+- **Editing:** the web UI decrypts within the session. For Obsidian access to a personal brain, a sync client decrypts on the person's own device (phase 4).
+
+**What this guarantees, and what it doesn't:**
+
+| Threat | Protected? |
+|---|---|
+| An org admin reads stored files, the database or backups | **Yes.** They hold only ciphertext. |
+| An org admin uses an admin feature to view someone's brain | **Yes.** No such feature exists. |
+| A stolen disk or leaked backup | **Yes** |
+| An operator **modifies the running server** to capture plaintext while the person is active | **No.** Plaintext exists in memory during processing. Mitigations: open-source code, reproducible builds, and an optional **confidential-computing** mode (AMD SEV-SNP / Intel TDX with attestation) for organisations that need this guarantee. |
+| The LLM and decision-model providers see content while processing it | **Yes, they do.** Each provider is listed as a data processor. Personal-brain judgments and extraction can be routed to self-hosted models (e.g. open-weight Clef, a local LLM). |
+| The person loses their passkey and recovery key | **Their personal brain is lost.** This is the price of the organisation being unable to read it. |
+
+**Leaving the organisation:** the person can export their personal brain, decrypted, as markdown. The organisation deletes the ciphertext according to its retention policy. The person's contributions to group brains stay, attributed to them.
+
+### 7.4 Group brains: vault layout and note format
 
 ```
-<context>/
-  AGENTS.md        # conventions for this context (read by ingest and lint)
+<group-context>/
+  AGENTS.md        # conventions for this context (read by ingest)
+  policy.md        # purpose, scope, examples in and out (used by the classifier)
   profile.md       # ~500-token always-loaded summary, compiled by ingest
   index.md, log.md # Karpathy-style index and change log
-  raw/             # immutable sources: transcripts, docs, clippings
-  inbox/           # unprocessed `remember` writes, with attribution
-  wiki/            # curated entity notes (people, services, projects, decisions)
-  review/          # items the judge was unsure about, for a human to resolve
+  raw/             # sources: documents, meeting notes, Slack digests
+  inbox/           # items awaiting ingest
+  wiki/            # entity notes: people, services, projects, decisions
 ```
 
-An entity note (illustrative; the exact attribution syntax will be fixed in phase 1 so it stays valid Basic Memory and readable in Obsidian):
+An entity note (illustrative; the exact attribution syntax is fixed in phase 1 so it stays valid Basic Memory):
 
 ```markdown
 ---
@@ -248,8 +331,8 @@ type: service
 Public API for creating and tracking orders. Owned by the payments team.
 
 ## Facts
-- [constraint] Idempotency keys expire after 24 hours #api (by: alice · src: [[raw/2026-10-12-design-review#Retries]] · from: 2026-10-12)
-- [decision] Pagination is cursor-based; offset pagination is deprecated (by: bob · from: 2026-09-01)
+- [constraint] Idempotency keys expire after 24 hours #api (by: alice · src: [[raw/2026-10-12-design-review#Retries]] · from: 2026-10-12 · cat: 1/rule:group-source)
+- [decision] Pagination is cursor-based; offset pagination is deprecated (by: bob · from: 2026-09-01 · cat: 1/rubric 0.96)
 
 ## Relations
 - owned_by [[Payments Team]]
@@ -259,156 +342,222 @@ Public API for creating and tracking orders. Owned by the payments team.
 - [sla] p99 latency target is 300 ms (by: carol) vs 500 ms (by: dave)
 ```
 
-Conventions for groups:
-- Every fact carries who asserted it, a source link into `raw/`, and valid-from/to dates.
-- Conflicting claims go under `## Disputed` with both attributed. They are never silently overwritten.
-- Superseded facts get a `to:` date rather than being deleted, so the history stays answerable ("what was the limit before October?").
+Every fact records its author, source, valid-from/to dates, and **why it was shared** (the rule, or the rubric score). Conflicting claims are recorded under `## Disputed`, with both attributed, rather than one overwriting the other.
 
-### 7.2 Model-facing tools
+### 7.5 Model-facing tools
 
-Five tools, about 700 tokens of definitions in total. Long guidance lives in an on-demand `man` resource rather than in the tool descriptions.
+Six tools, about 800 tokens of definitions. Longer guidance lives in an on-demand `man` resource.
 
 ```
-profile(contexts)                        → ~500-token core block per context, compiled ahead of time
+profile(contexts?)                       → ~500-token core block per attached context (personal + groups)
 recall(query, contexts?, budget_tokens=1500, detail=facts|snippets|sections)
-                                         → ranked hits: id (note#heading), text, author, valid dates;
-                                           packed to the budget; reports the omitted count + a cursor
+                                         → ranked, attributed hits packed to the budget; omitted count + cursor
 read(id, max_tokens?)                    → one section, cut at a heading boundary, with where to continue
-outline(id | context)                    → headings and their token sizes, to plan a read
-remember(context, text, about?, source?) → appends to inbox/ with the caller's identity; never edits wiki/
+outline(id | context)                    → headings and their token sizes
+remember(text, context?, source?)        → classified on arrival; returns a receipt saying where it went
+                                           (group X / kept private / "may be useful to group X: share?")
+update(ids, action, text?)               → share | keep_private (answers a consent prompt)
+                                           edit | retract (own contributions, personal or group)
 ```
 
-`recall` is **fact-first**. It returns facts, then the matching entity summaries, and source sections only when `detail=sections` asks for them. The budget counts everything in the response, metadata included.
+The **consent prompt** for category 2 reaches the person in two ways:
+- **Inline:** `remember`'s receipt asks the model to check with the person ("This may be useful to team-payments. Share it?"), and the model calls `update` with the answer.
+- **Batched:** unanswered prompts appear in a digest in the web UI, with an optional Slack DM.
 
-### 7.3 Ingest pipeline and the judge interface (where Jev fits)
+Every answer can be saved as a standing rule ("always share API constraints with team-payments"), so the questions dwindle over time.
 
-The ingest worker runs on a schedule or on inbox events. Generating text (fact wording, summaries, the profile) needs an LLM. Most of the other work is **classification**, and that goes through the judge interface:
+### 7.6 The three-category classifier
+
+The classifier runs on every item and implements §2 in four layers.
+
+**Layer 1: fixed rules.** These are deterministic, run first, and no model can override them.
+
+- **Forced category 3:**
+  - credentials and secrets (refused entirely);
+  - health, family and personal finances;
+  - pay, performance and HR matters;
+  - personal contact details;
+  - claims about a named person's behaviour, performance or private life;
+  - topics on the person's own "always private" list.
+- **Forced category 1, subject to the category 3 rules:**
+  - the person explicitly addressed a group ("remember for team-payments");
+  - the item came from a group source (§7.2);
+  - the item matches one of the person's own standing share rules;
+  - the item matches the group's `policy.md` "always group" types (e.g. decisions about services the group owns).
+- **Order:** category 3 rules win over category 1 rules. If both fire, the person is told the item stayed private and why.
+
+**Layer 2: rubric questions,** asked of the decision model through the interface in §7.7.
+
+| Dimension | Question | Type |
+|---|---|---|
+| Scope | Which of the person's groups does this fall under, judged against each group's `policy.md`? Or none? | Choice |
+| Subject | Is this about the author's personal life, preferences or habits rather than the group's shared work? | Probability |
+| Sensitivity | Public, internal, confidential, personal-sensitive, or secret? | Choice |
+| Other people | Does it make claims about a named person's behaviour, performance or private life? | Probability |
+| Usefulness | How likely are other group members to need this in the next 3 months? (none / low / medium / high) | Score |
+| Durability | Will it still be true and useful in 30 days? | Probability |
+| Novelty | Does the group already know this? (asked against the top matching facts) | Probability |
+
+**Layer 3: mapping scores to a category,** using asymmetric thresholds. These are the proposed starting values, tuned per group.
+
+| Step | Condition | Result |
+|---|---|---|
+| 0. Worth keeping? | Durability < 0.5 and usefulness to the author is low | **Drop.** Not stored anywhere. |
+| 1. Private? | Sensitivity ≥ personal-sensitive at p ≥ 0.2, **or** other-people ≥ 0.3, **or** subject ≥ 0.5, **or** no scope fits | **Category 3** |
+| 2. Group? | Scope fits one group at p ≥ 0.9, sensitivity ≤ internal at p ≥ 0.95, subject ≤ 0.1, usefulness ≥ medium, novelty says it's new | **Category 1** |
+| 3. Otherwise | — | **Category 2** (ask) |
+
+The private test is deliberately easy to trigger and the group test deliberately hard to pass, so classification errors land on the side of privacy.
+
+**Layer 4: the author's control and learning from it.** There is no curator or approval queue.
+- **Category 1 items** are listed in the author's digest ("Shared with team-payments: …"). The author can edit or retract any of them at any time.
+- **Category 2 consent answers** and **category 1 retractions** are logged as labels. Retractions are the main signal that auto-sharing got something wrong, and they are used to recalibrate thresholds per group and per decision model.
+- **Quality targets** (see the plan):
+  - zero sensitive items reaching a group in the test set;
+  - at least 98% of auto-shared items never retracted;
+  - consent prompts per person stay low enough not to be a nuisance.
+
+### 7.7 Decision-model interface: any model, Jev by default
+
+Every non-generative judgment goes through one interface. That covers the classifier rubric, plus group maintenance: dedupe, entity matching, supersede and contradict, and optionally reranking. Generating text is not a decision-model job: fact wording, summaries and profiles always use an LLM.
+
+**The contract** has three question types:
 
 ```
-judge.noul(state, statement)          → p(true), confidence     # "is this statement true?"
-judge.choice(state, question, options)→ distribution, confidence # pick one of N
-judge.score(state, question, levels)  → distribution, confidence # rate on a scale
+probability(state, statement)          → p(true), confidence
+choice(state, question, options)       → distribution over options, confidence
+score(state, question, levels)         → distribution over ordered levels, confidence
 ```
 
-These three question types map directly onto Jev's Noul, Choice and Score. The LLM and local providers implement the same signatures, using structured output and log-probabilities where available.
+This is the shape Jev's API uses and Clef copies, so one adapter covers both.
 
-| Judgment | Question type | Without a judge | Notes |
-|---|---|---|---|
-| Is this a durable fact worth keeping? | Noul | LLM decides | TypeSafe's memory cookbook does exactly this |
-| Which context and which entity note does it belong to? | Choice over a search-produced shortlist | LLM | Search first, then judge |
-| Same entity, or a duplicate fact? | Score + Noul | String match or LLM | Entity-alignment cookbook: merge, send to review, or keep separate |
-| Does it supersede or contradict an existing fact? | Noul | LLM | Low confidence → `## Disputed` or `review/` |
-| **Private or shareable** before it lands in a shared context? | Choice | Nothing checks this today | **The most valuable judgment for organisations** |
-| Rerank recall candidates | Noul per candidate | Local cross-encoder reranker | TypeSafe's rerank cookbook reports top-10 accuracy rising from 38% to 62% over BM25 alone (vendor number); to be measured against a local reranker |
-| Which attached contexts does a query need? | Noul per context | Search them all | Minor gain |
+**Provider adapters:**
 
-**Confidence drives automation.** Each judgment has two thresholds per deployment:
-- **Above the high threshold:** apply automatically.
-- **Between the thresholds:** send to `review/` for a human.
-- **Below the low threshold:** drop.
+| Adapter | Covers |
+|---|---|
+| `decision-api` | Any Jev-compatible endpoint: **Jev (default)**, Clef on Workers AI, self-hosted Clef or Clef-flash, future compatible models. Configured by URL and model name. |
+| `llm` | Any OpenAI-compatible or Anthropic endpoint, using structured output (and log-probabilities where available) |
+| `classifier` | A small trained model, e.g. one fine-tuned on a deployment's own consent and retraction labels |
+| `rules` | Deterministic rules, used in layer 1 and as a last fallback |
 
-Thresholds are calibrated on labelled examples from the evaluation set, because confidence measures certainty, not correctness.
+**Routing per judgment, with fallbacks:**
 
-**Why Jev is the recommended judge:**
-- **Fit:** it is built for exactly these typed decisions and returns calibrated probabilities, which is what the threshold scheme needs.
-- **Cost:** $0.042 per million input tokens, with output free. An illustrative workload:
-  - about 5 judgments per write, at about 2k tokens of state each, is about 10k tokens per write
-  - a million writes is then about **$420** in judge cost.
-  - Real cost depends on prompt size and is measured in phase 3.
-- **Speed and consistency:** a non-generative model avoids long generations and gives the same kind of answer every time. That matters once an organisation's ingest volume is in the thousands of writes a day.
-- **Documented for this problem:** TypeSafe publishes memory, rerank and entity-alignment cookbooks.
+```yaml
+decision_models:
+  providers:
+    jev:        { kind: decision-api, url: <typesafe endpoint>, model: jev }          # default
+    clef-self:  { kind: decision-api, url: http://clef.internal:8080, model: clef-flash }
+    llm:        { kind: llm, model: <any> }
+  default: [jev, llm]
+  routing:
+    personal.*: [clef-self, llm]        # e.g. keep judgments on personal content in-house
+```
 
-**Why it is not a hard dependency:**
-- Jev is **hosted only**, with no open weights. It has been in **early access since September 2026**, so versions change often.
-- Data retention is not stated publicly. **(unverified)**
-- Some deployments can't send content to an outside API: air-gapped installs, or data-processing rules.
-- An open-source project must run with **no required proprietary service** (R6).
+**Calibration.** Confidence measures how sure a model is, not whether it is right. Each provider gets a calibration step per judgment, fitted on labelled data from the public test set and later on the deployment's own consent and retraction labels. That way a threshold such as "p ≥ 0.9" means the same thing whichever model is plugged in.
 
-So the LLM provider (any OpenAI-compatible or Anthropic endpoint) and a local small-model provider ship as equals. Phase 4 compares all three on the public evaluation set and publishes the results.
+**Adding a new decision model** means writing an adapter (or none, if its API is Jev-compatible), running the shared test suite, and publishing the results.
 
-**What Jev cannot do:** write the fact text, summaries or the profile. Those always need a generative model, either the deployment's LLM or the calling client's model.
+**Why Jev is the default:**
+- It was the first model built for exactly these typed judgments.
+- It returns calibrated probabilities.
+- It is cheap ($0.042 per million input tokens). An illustrative workload:
+  - about 8 judgments per item, at about 2k tokens each, is about 16k tokens per item;
+  - a million items is then about **$670** in judge cost.
+- TypeSafe publishes memory, rerank and entity-alignment cookbooks for this kind of work.
 
-### 7.4 Capture
+**What to weigh before relying on it:**
+- Jev is hosted only and in early access. Retention terms are not stated publicly **(unverified)**.
+- Under the default config it sees the content it classifies, including personal items.
+- Deployments that can't accept that can route personal-brain judgments, or everything, to self-hosted Clef or an LLM they trust, using the configuration above.
 
-There are three capture paths, borrowed from the LLM-wiki pattern and from flow:
-- **Scoop:** the model calls `remember` during a session when a durable fact comes up.
-- **Sweep:** when a session ends, the transcript is posted to `raw/` and the ingest worker mines it for facts the model missed. This works where the harness exposes the transcript, such as Claude Code hooks; elsewhere it is an explicit upload.
-- **Session-start hook:** where the harness supports hooks, `profile` and `recall` are called automatically. Elsewhere a one-line instruction in the client's project or system prompt does the same.
+### 7.8 Maintaining group facts
+
+Once an item is in category 1, the maintenance step decides how it lands. These decisions also go through the decision-model interface, with conservative defaults instead of a review queue:
+
+| Question | If confident | If unsure |
+|---|---|---|
+| Is it the same entity as an existing one? | Merge into that note | Create a separate note, linked as "possibly the same as" |
+| Is it a duplicate of an existing fact? | Add the author as a co-asserter | Keep both |
+| Does it supersede an older fact? | Set `to:` on the old fact | Record both under `## Disputed` |
+
+A scheduled lint pass reports orphans, stale facts and growing dispute lists for each group. It doesn't block anything.
 
 ## 8. Hosting profiles
 
-The same container image and configuration schema serve every profile. What changes is listed below.
+The same container image and configuration schema serve every profile.
 
 | | **Personal** | **Organisation** | **Community (anyone self-hosting)** |
 |---|---|---|---|
-| Who | One person, maybe a partner or a small group | A company: many teams, hundreds of people | Individuals and groups running their own instance |
-| Runs on | Laptop (stdio MCP for local clients) plus an optional small VPS or tunnel for web clients | The org's container platform (Kubernetes or a VM) inside its network, with a public HTTPS ingress for SaaS AI clients | Docker Compose on a VPS or home server; a Helm chart for those who want it |
-| Identity | Built-in OAuth server with a single user, or GitHub sign-in | **OIDC to the org's identity provider** (Okta, Google Workspace, Entra ID). Context access is mapped from IdP groups. | Built-in OAuth server, or any OIDC provider |
-| Contexts | `personal` plus a few others | Per team, per project, org-wide handbook, and a personal context per employee | Whatever the operator defines |
-| Storage and sync | Local vault + git; Obsidian Sync optional | One **git repository per context** on the org's git host. Branch protection and CODEOWNERS give review of curated files. | Local disk + git; Obsidian Sync or Relay for small groups |
-| Human UI | Obsidian | Web UI and git for most people; Obsidian for power users | Obsidian or the web UI |
-| Judge provider | Jev or the person's own LLM key | Jev under an org data-processing agreement, **or** the org's approved LLM endpoint, chosen per judgment | Operator's choice; the LLM judge is the default so nothing proprietary is required |
-| LLM provider (extraction, summaries) | Any | The org's approved provider or gateway | Any, including local models |
-| Ops | None to speak of | SSO, audit log export, backups, retention policies, monitoring, the org's security review | Backups via git |
+| Who | One person, maybe a few people | A company: many teams, hundreds of people | Individuals and groups running their own instance |
+| Runs on | Laptop (stdio for local clients), plus an optional small VPS or tunnel for web clients | The org's container platform, with public HTTPS ingress for SaaS AI clients | Docker Compose on a VPS or home server; Helm optional |
+| Identity | Built-in OAuth, single user | **OIDC to the org's identity provider**; group membership from IdP groups | Built-in OAuth or any OIDC provider |
+| Personal brains | One, encryption optional (you are the operator) | Encrypted with person-held keys (§7.3); confidential-computing mode optional | Encrypted with person-held keys |
+| Group brains | Optional | One git repository per group, on the org's git host | Local git |
+| Slack | Usually not needed | The org's own **internal** Slack app, invited to channels | Optional, as an internal app in their own workspace |
+| Meeting notes and documents | Upload or drop folder | Upload; connected folders per group (e.g. where meeting transcripts land) | Upload or drop folder |
+| Decision model | Jev by default | Jev under a data-processing agreement, or self-hosted Clef, or the org's LLM, chosen per judgment | Jev by default; self-hosted Clef or an LLM for no external dependency |
+| Human UI | Obsidian or web | Web UI; Obsidian and git for group contexts | Web UI or Obsidian |
 
-**Multi-tenant hosting** (one instance serving unrelated organisations) is out of scope for v1. The design keeps a tenant identifier at the top of the context namespace so it can be added later without a data migration.
+**Multi-tenant hosting** (one instance serving unrelated organisations) is out of scope for v1. A tenant identifier sits at the top of the context namespace so it can be added later.
 
 ## 9. Security, privacy and compliance
 
-- **Access control is enforced at the gateway on every call.** A caller sees only the contexts their identity grants, and recall never merges results across contexts the caller can't read. Write permission is separate from read permission.
-- **Stored text is untrusted input.** Facts written by one person end up in another person's model context, so memory poisoning and prompt injection are real risks. Mitigations:
-  - Every fact carries its provenance.
-  - `recall` output is clearly framed as data, not instructions.
-  - Writes to shared contexts go through the inbox and the judge, and through review where the deployment requires it.
-  - Each context has an allowlist of who may write.
-- **Secrets and sensitive data:**
-  - Writes are scanned for credentials and refused.
-  - The "private or shareable" judgment runs before any write to a shared context.
-  - Organisations can add their own data-classification rules.
-- **Deletion:**
-  - Deleting a note removes it from the index; a scheduled reconcile verifies this.
-  - **Git history still holds deleted content.** Deployments with "right to erasure" duties need a history-rewrite procedure or a git host retention policy, and this must be documented, not glossed over.
-- **External processors:** a deployment's config lists every outside service that sees content (judge, LLM, embeddings), so a data-protection review can approve it. The default community config sends nothing outside the host except to the LLM the operator configures.
-- **Audit:** every tool call is logged with its identity, contexts, token count and IDs returned (not the content), and the log can be exported to the org's SIEM.
+- **Access control is enforced at the gateway on every call.** Personal brains are reachable only by their owner, and group brains only by members. Recall never merges results across contexts the caller can't read.
+- **Personal brains are encrypted with person-held keys.** §7.3 sets out what that does and doesn't protect against.
+- **Stored text is untrusted input.** Facts written by one person reach another person's model, so memory poisoning and prompt injection are real risks. Mitigations:
+  - every fact carries its provenance;
+  - `recall` output is framed as data, not instructions;
+  - classification and secret scanning run on every write;
+  - each group has a list of who may write to it.
+- **Secrets are refused at the door.** Credentials found by the scanner are never stored anywhere, personal brains included.
+- **Retraction and erasure:**
+  - A retraction removes the fact from the group vault and its index immediately.
+  - **Git history still holds it.** Group repositories therefore get periodic history compaction: commits older than a configurable window are squashed, so retracted content is purged within that window.
+  - Content already returned to someone's AI session can't be recalled. This is documented for users.
+- **External processors:** every outside service that sees content is declared in config, so a data-protection review can approve it. That covers the decision model, the LLM, embeddings and Slack.
+- **Compliance tension:** some organisations need to access employee data on company systems, for e-discovery, legal hold or data-loss prevention. Encrypted personal brains deliberately prevent that. Each organisation's legal team must accept this before deploying, and some may need to disable personal brains or switch to organisation-held keys. That would be a separate, clearly labelled configuration.
+- **Audit:** every tool call is logged with its identity, contexts, token count and the IDs returned (not the content). Personal-brain calls log only that a call happened.
 
 ## 10. Licensing
 
-- **Basic Memory is AGPL-3.0.**
-  - We run it unmodified as a separate service and talk to it over its API or MCP interface.
-  - Our gateway is therefore a separate work and can carry a permissive license.
-  - If we ever need to modify Basic Memory, those changes must be published under the AGPL, ideally upstream.
-- **Proposal:** Apache-2.0 for this repository. It includes a patent grant and is common in enterprise open source.
-- **Jev** is a proprietary hosted API, used only through an optional provider plugin. No TypeSafe code is vendored.
-- **Needs confirmation** by whoever owns open-source policy in the sponsoring organisation.
+- **Basic Memory is AGPL-3.0.** We run it unmodified as a separate process, one instance per unlocked personal brain and one per group, and talk to it over its interface. The gateway is a separate work and can carry a permissive license. Any changes we make to Basic Memory itself would be published under the AGPL, ideally upstream.
+- **Proposal:** Apache-2.0 for this repository.
+- **Jev** is a proprietary hosted API, used through the generic `decision-api` adapter. **Clef** weights are Apache-2.0. Neither is vendored.
+- **Needs confirmation** by the sponsoring organisation's open-source policy owner.
 
 ## 11. Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Fact extraction introduces errors that spread | Medium | High | Raw sources kept alongside facts; human review for low confidence; lint job; attribution on every fact |
-| Basic Memory changes direction or stalls | Low–medium | Medium | Storage adapter boundary; the format is plain markdown, so we can re-index with qmd or similar |
-| Jev's API, pricing or availability changes | Medium | Low–medium | Judge interface with LLM and local providers; per-judgment provider config |
-| Token savings smaller than expected | Medium | Medium | Measured at the phase-1 gate before the large build |
-| Clients' MCP support shifts (plans, regions, auth flows) | Medium | Medium | Standard OAuth 2.1 + DCR; track client matrix; stdio for local clients |
-| Memory poisoning across a shared context | Medium | High | §9 mitigations; write allowlists; review queue |
-| Deletion obligations vs git history | Medium (orgs) | High | Documented erasure procedure; retention settings; option to store `raw/` outside git |
-| People don't keep the brain tidy | High | Medium | Ingest does the tidying; review queue kept small by thresholds; a weekly lint report per context |
+| Auto-sharing puts something personal into a group | Medium | **High** | Fixed rules first; asymmetric thresholds; retraction any time; zero-leak target on the test set before launch |
+| Too many consent prompts, so people ignore them | Medium | High | Standing rules learned from answers; batched digests; prompts per person tracked as a metric |
+| Too few items shared, so group brains stay empty | Medium | High | Group sources (Slack, meeting folders) bypass the personal/group question; per-group threshold tuning |
+| Fact extraction introduces errors that spread | Medium | High | Sources kept alongside facts; attribution; disputes recorded rather than overwritten; lint |
+| Personal-brain key loss | Medium | Medium | Recovery key at enrolment; clear warnings; export |
+| Operator compromise of the running server | Low | High | Open-source code, reproducible builds, optional confidential computing |
+| Legal teams reject operator-blind personal brains | Medium | Medium | Organisation-held-key mode as an explicit alternative; documented trade-off |
+| Decision-model API, pricing or availability changes | Medium | Low–medium | Decision-model interface; per-judgment routing; open-weight fallback |
+| One engine instance per unlocked person is costly at scale | Medium | Medium | Measured in phase 2; idle instances evicted; shared engine with per-person encrypted indexes as plan B |
+| Slack API terms change | Low–medium | Medium | Internal-app model; Slack is one way in among several |
+| Basic Memory changes direction or stalls | Low–medium | Medium | Storage adapter boundary; the format is plain markdown |
 
 ## 12. What would change this decision
 
-- **Phase 1 results.** If a managed option (B or C) matches our prototype on accuracy and tokens, and meets R4–R6 well enough for the sponsoring organisation, we would adopt it and keep this repository as the format, eval set and recipes only.
-- **Hindsight.** If Hindsight gains human-editable storage, it could replace Basic Memory as the engine behind the storage adapter.
+- **The classifier can't reach the targets.** If phase 1 shows the three-category classifier can't reach zero leaks with a useful share rate, the automatic flow doesn't work. We would then reduce category 1 to fixed rules only (explicit addressing and group sources) and route everything else through consent.
+- **A managed product appears** that offers person-held encryption and policy-based sharing. We would then adopt it and keep this repository as the format, the classifier test suite and the recipes.
+- **Hindsight gains human-editable storage.** It could then replace Basic Memory behind the storage adapter.
 
 ## 13. Questions for reviewers
 
-1. **Build vs adopt.** Is a thin gateway on Basic Memory the right call, or should we start on Basic Memory Cloud/Teams and build only if it falls short?
-2. **Single writer.** Is one ingest worker per context acceptable for latency? `remember` lands in the inbox immediately, but promotion to curated facts is batched.
-3. **Jev as the recommended judge.** Is a hosted, early-access model acceptable as the default for the organisation profile, given the LLM fallback? What would legal or security need to approve it?
-4. **Git per context** for the organisation profile: right for audit and review, or too heavy for non-engineers?
-5. **Erasure.** Which approach to deletion versus git history do we want to commit to?
-6. **Licensing.** Apache-2.0 for our code, with Basic Memory kept as a separate AGPL service: any objections?
-7. **Scope of v1 capture.** Should v1 include document sources (Drive, Confluence, Notion), or stay with `remember` plus transcript sweep?
-8. **Name.** "context-brain" is a working name.
+1. **Automatic sharing.** Is "category 1 goes to the group without asking" acceptable for your teams, given notification plus retraction at any time? What would you need to see from the test set first?
+2. **Thresholds.** Are the starting thresholds in §7.6 sensibly cautious?
+3. **Operator-blind personal brains.** Is the guarantee in §7.3 strong enough, and is the compliance trade-off in §9 acceptable? Should confidential computing be required, or optional?
+4. **Engine instance per person.** Is one engine instance per unlocked personal brain acceptable, or should we design a shared engine with per-person encrypted indexes from the start?
+5. **Jev as the default decision model,** with personal-brain judgments routable to self-hosted Clef. What would legal or security need to approve that default?
+6. **Group sources.** Is it right that Slack channels and group meeting folders skip the personal/group question and only filter out category 3?
+7. **Git per group** with periodic history compaction for retraction: right, or should group brains use a different store?
+8. **Licensing.** Apache-2.0 for our code, with Basic Memory kept as a separate AGPL process: any objections?
+9. **Name.** "context-brain" is a working name.
 
 ## 14. Sources
 
@@ -423,6 +572,9 @@ The same container image and configuration schema serve every profile. What chan
 - [Hindsight](https://github.com/vectorize-io/hindsight), [Graphiti](https://github.com/getzep/graphiti), [Cognee](https://github.com/topoteretes/cognee), [Mem0](https://github.com/mem0ai/mem0), [HippoRAG](https://github.com/osu-nlp-group/hipporag), [qmd](https://github.com/tobi/qmd), [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service), [Memlord](https://github.com/MyrikLD/memlord), [flow](https://github.com/Facets-cloud/flow)
 - LLM-wiki implementations: [nashsu/llm_wiki](https://github.com/nashsu/llm_wiki), [lucasastorian/llmwiki](https://github.com/lucasastorian/llmwiki)
 - Jev / TypeSafe: [docs](https://docs.typesafe.ai/introduction), [OpenRouter overview](https://openrouter.ai/blog/insights/what-is-jev/), cookbooks for [memory](https://docs.typesafe.ai/cookbooks/basic_memory.md), [rerank](https://docs.typesafe.ai/cookbooks/rerank_typesafe.md) and [entity alignment](https://docs.typesafe.ai/cookbooks/entity_alignment.md)
+- Clef / Cloudflare: [Introducing Clef](https://blog.cloudflare.com/clef-decision-models/), [weights on Hugging Face](https://huggingface.co/Cloudflare/clef)
+- Slack: [API terms](https://slack.com/terms-of-service/api), [rate-limit changes for non-Marketplace apps](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps)
+- WebAuthn: [PRF extension](https://w3c.github.io/webauthn/#prf-extension)
 - [Supermemory](https://supermemory.ai/pricing), [Notion MCP](https://www.notion.com/help/notion-mcp)
 - Obsidian: [Sync collaboration](https://obsidian.md/help/sync/collaborate), [headless sync](https://obsidian.md/help/sync/headless)
 - Client support: [Claude custom connectors](https://support.claude.com/en/articles/11175166), [Gemini custom MCP apps](https://support.google.com/gemini/answer/17209137)

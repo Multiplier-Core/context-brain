@@ -4,157 +4,205 @@
 |---|---|
 | **Status** | Draft for engineering review |
 | **Depends on** | [decision.md](decision.md) |
-| **Assumes** | Two engineers, roughly full-time, plus part-time help from security and a pilot team. Durations are estimates for reviewers to challenge. |
+| **Assumes** | Two engineers, roughly full-time, plus a part-time security engineer from phase 2 and a pilot team in phase 3. Durations are estimates for reviewers to challenge. |
 
 ---
 
 ## Overview
 
+The riskiest assumption is that **automatic three-category classification is accurate enough to run without a human in the loop**. The plan tests that first, before building the rest.
+
 | Phase | Goal | Estimate | Ends with |
 |---|---|---|---|
-| 0. Foundations | Repo, license, evaluation set and harness | 1 week | A public eval set and a baseline measurement script |
-| 1. Prototype and gate | Prove the format and the token savings; compare against managed options | 2–3 weeks | **Gate 1: build or adopt** |
-| 2. Gateway core | Remote MCP with auth, access control and the five tools; personal profile | 3–4 weeks | Usable by individuals from any MCP client |
-| 3. Ingest, judges and groups | Ingest pipeline, judge interface (Jev + LLM), capture, organisation profile, pilot | 4–6 weeks | **Gate 2: pilot review** |
-| 4. Tuning and public release | Judge bake-off, reranking, entity matching, community packaging, security review | 3–4 weeks | v0.1 public release |
+| 0. Foundations | Repo, license, public test sets and harness | 1–2 weeks | Test sets for retrieval and classification, and a baseline script |
+| 1. Prototype and gate | Prove the classifier and the token savings | 3–4 weeks | **Gate 1: is automatic classification trustworthy?** |
+| 2. Gateway and personal brains | Remote MCP, six tools, classification on `remember`, encrypted personal brains, web UI v0 | 5–6 weeks | Individuals use it daily from any client |
+| 3. Ways in and organisation | Documents, meeting notes, Slack, group maintenance, decision-model interface, organisation profile, pilot | 5–6 weeks | **Gate 2: pilot review** |
+| 4. Tuning and public release | Decision-model bake-off, recalibration, community packaging, security review | 3–4 weeks | v0.1 public release |
 
-That is about 3–4 months in total to a public v0.1, with a decision point after week 3–4 where we can stop cheaply.
+That is about 4–5 months in total to a public v0.1. Gate 1, after about 5 weeks, is the cheap place to stop or change course.
 
-## Phase 0: Foundations (1 week)
+## Phase 0: Foundations (1–2 weeks)
 
-- Create the public repository, with the license (proposed Apache-2.0, pending the open-source policy owner), `CONTRIBUTING.md`, a code of conduct and a security policy.
+- Create the repository with its license (proposed Apache-2.0, pending the open-source policy owner), `CONTRIBUTING.md`, a code of conduct and a security policy.
 - Record the decisions in [decision.md](decision.md) as ADRs once reviewers agree.
-- **Build the public evaluation set.** It is a synthetic, fictional organisation, so it can be published and reused by anyone:
-  - about 200 notes across 4 contexts, covering people, services, decisions and projects, with deliberate duplicates, superseded facts and conflicting claims
-  - about 100 questions with gold answers, covering these types:
+- **Public test sets,** built around a fictional organisation so they can be published and reused by anyone:
+  - **Organisation:** about 10 personas across 4 groups, each group with a `policy.md`.
+  - **Retrieval set:**
+    - about 200 notes, with deliberate duplicates, superseded facts and conflicting claims;
+    - about 100 questions with gold answers. They cover single facts, entity summaries, multi-step questions, "what was true before", disputed facts, questions that need two contexts, and **access** questions whose answer the caller must not see.
+  - **Classification set:** about 600 items, each labelled with its correct category for its author. Examples:
 
-    | Type | Example |
+    | Example item | Correct category |
     |---|---|
-    | Single fact | "When do idempotency keys expire?" |
-    | Entity summary | "What do we know about the Ledger Service?" |
-    | Multi-hop | "Who owns the service the Orders API depends on?" |
-    | Temporal | "What was the rate limit before October?" |
-    | Disputed | "What is the p99 target?" (must surface both claims) |
-    | Cross-context | Questions that need two attached contexts |
-    | **Access** | Questions whose answer sits in a context the caller **cannot** read (must not leak) |
-    | Sensitive | Writes containing secrets or personal data (must be blocked or kept private) |
+    | "Orders API idempotency keys expire after 24 hours" | 1: group |
+    | "Thinking we should move standup to 10am" | 2: uncertain |
+    | "I prefer tabs over spaces" | 3: private |
+    | "My school pickup is at 3pm" | 3: private, sensitive |
+    | "A colleague seemed checked out in standup" | 3: private, claim about a person |
+    | An API key pasted into a chat | Refused |
 
-- **Build the harness.** It runs a question set against a retrieval method and records answer accuracy (LLM-graded against the gold answers, with a sample checked by hand), tokens returned, tool-definition tokens and latency.
-- Each deployment can add its own **private** question set in the same format. The organisation pilot will.
+    It deliberately includes hard cases: sensitive content phrased as work, work content phrased casually, and mixed items. Each item also comes in Slack, meeting-note and document form.
+- **Harness:**
+  - **Retrieval:** answer accuracy (LLM-graded, with a sample checked by hand), tokens returned, tool-definition tokens and latency.
+  - **Classification:** a confusion matrix across the three categories, **leak count** (category 3 items that reached a group), auto-share precision, coverage, and prompts per 100 items.
+- Each deployment can add **private** sets in the same format. The pilot will.
 
-## Phase 1: Prototype and gate (2–3 weeks)
+## Phase 1: Prototype and gate (3–4 weeks)
 
 **Build** (throwaway quality is fine):
-- Finalise the note format: observations, relations, attribution, valid-from/to, `## Disputed`. Check that it stays valid Basic Memory syntax and renders well in Obsidian.
-- Run Basic Memory locally over the eval vaults, exposed over stdio to Claude Code and Claude Desktop.
-- Hand-write a minimal `recall` that packs facts first and then sections into a budget, as a script or a thin MCP wrapper.
+- Finalise the note format: observations, relations, attribution, valid-from/to, `## Disputed`, and the "why shared" field. It must stay valid Basic Memory and render well in Obsidian.
+- Run Basic Memory over the test vaults; hand-write a budgeted, fact-first `recall`.
+- **Classifier prototype:**
+  - the layer 1 fixed rules;
+  - the layer 2 rubric, against **Jev**, **Clef** and an **LLM**, each called directly;
+  - layer 3 thresholds, with a first calibration per model.
 
-**Measure** on the public eval set:
+**Measure:**
 
-| Method | What it tells us |
+| What | Compared |
 |---|---|
-| Load the whole vault | Accuracy ceiling and token cost to beat |
-| Basic Memory search + section reads, as is | What the engine gives for free |
-| Fact-first budgeted recall (ours) at 500 / 1,500 / 3,000 tokens | Whether our layer earns its keep |
-| Basic Memory Cloud/Teams, Supermemory (where they can load the data) | The adopt-instead options |
+| Retrieval accuracy and tokens | Whole vault vs Basic Memory search as-is vs our recall at 500 / 1,500 / 3,000 tokens |
+| Classification quality | Rules only vs rules + Jev vs rules + Clef vs rules + LLM |
+| Classification on group sources | The category 3 filter on Slack, meeting-note and document versions of the items |
 
 **Verify:**
-- Deleting or editing a note in Obsidian is reflected in search. If not, design the reconcile job.
-- MCP connection and OAuth flow from claude.ai, ChatGPT and Gemini to a stub server, to confirm the client matrix.
+- Edits and deletes in a vault reach the search index.
+- Remote MCP and OAuth sign-in work from claude.ai, ChatGPT and Gemini, against a stub server.
+- **Encryption spike:** passkey PRF key wrapping, plus decrypting a vault and its index in memory for one session with an engine instance per person. Measure memory use and time to unlock.
 
-### Gate 1: build or adopt
+### Gate 1: is automatic classification trustworthy?
 
-Proposed pass criteria for continuing with the build (reviewers, please challenge the numbers):
-1. Fact-first recall at **≤1.5k tokens** reaches answer accuracy **within 5 points** of loading the whole vault, using **≤10% of its tokens**.
-2. It beats Basic Memory's out-of-the-box search on accuracy per token by a clear margin. Otherwise we don't need our own recall layer, only the gateway.
-3. No managed option matches it on accuracy and tokens while also meeting R4–R6 for the organisation profile.
+These are the proposed pass criteria. Reviewers, please challenge the numbers.
 
-If (3) fails, adopt the managed option. This repository then keeps the format spec, the eval set and the client setup guides.
+1. **Zero leaks.** No category 3 item reaches a group on the classification set, with the best decision model and thresholds.
+2. **Auto-share precision ≥ 98%.** Items placed in category 1 really belong to the group.
+3. **Coverage ≥ 50%.** At least half of the true category 1 items reach the group without a prompt. Below that, the group brain fills too slowly to be worth it.
+4. **Prompt rate ≤ 20%.** At most a fifth of items trigger a consent prompt.
+5. **Retrieval:** recall at ≤ 1.5k tokens reaches answer accuracy within 5 points of loading the whole vault, at ≤ 10% of its tokens.
+6. **Encryption:** unlocking takes about 2 seconds or less for a vault of 5k notes, and memory per active person fits the expected hardware.
 
-## Phase 2: Gateway core (3–4 weeks)
+**If 1–2 pass but 3–4 don't,** we narrow category 1 to fixed rules only (explicit addressing and group sources) and send the rest through consent. **If 1 fails,** we stop and rethink the principle with reviewers before building anything more.
 
-- **Gateway service:**
-  - remote MCP over streamable HTTP
-  - OAuth 2.1 with dynamic client registration
-  - a built-in single-user auth server, plus OIDC federation
-- **Access control:** identity → contexts with read/write. Checked on every call; results are never merged across contexts the caller can't read.
-- **The five tools:** `profile`, `recall` (budgeted, fact-first), `read`, `outline`, `remember` (to `inbox/` only), plus the `man` resource.
-- **Storage adapter** over Basic Memory, run as a separate process. No changes to Basic Memory itself.
-- **Audit log and token metering** per call.
-- **Personal profile recipe:**
-  - a laptop install (stdio)
-  - a small VPS or tunnel for web clients
-  - setup guides for Claude, ChatGPT, Gemini, Cursor and Claude Code (including a session-start hook).
-- **Tests:** the access questions from the eval set pass with **zero leakage**, and token budgets are honoured, metadata included.
+## Phase 2: Gateway and personal brains (5–6 weeks)
 
-**Exit:** the team building it uses it daily from at least three different clients.
+- **Gateway:**
+  - remote MCP over streamable HTTP;
+  - OAuth 2.1 with dynamic client registration;
+  - a built-in single-user auth server, and OIDC federation.
+- **Access control:** a person's own brain plus the groups they belong to, checked on every call.
+- **The six tools:** `profile`, `recall`, `read`, `outline`, `remember` (classified on arrival, returns a receipt), `update` (share, keep private, edit, retract), plus the `man` resource.
+- **Classifier in the write path:** fixed rules, then the rubric through a first version of the decision-model interface with Jev (default) and LLM adapters, then the thresholds.
+- **Encrypted personal brains:**
+  - **Keys:** a key pair per person; the private key wrapped by a passkey (PRF) or passphrase; a recovery key at enrolment.
+  - **Writes while locked:** new items are encrypted to the person's public key.
+  - **Session unlock:** the vault and index are decrypted in memory only, for that session, in an engine instance dedicated to that person. Idle instances are evicted.
+  - **Export:** decrypted markdown.
+- **Group vaults:** one per group, with `policy.md`.
+- **Web UI v0:**
+  - "my contributions": where each item went and why;
+  - the consent digest;
+  - edit and retract;
+  - managing standing share rules and the "always private" list;
+  - browsing group brains.
+- **Personal profile recipe,** plus client setup guides and hooks: instructions for proactive `remember`, and Claude Code session-start and session-end hooks.
+- **Tests:**
+  - zero leakage on the access questions;
+  - stored personal data is ciphertext (checked by inspecting disk and backups as an admin would);
+  - token budgets are honoured.
 
-## Phase 3: Ingest, judges and groups (4–6 weeks)
+**Exit:** the team uses it daily from at least three different clients, and has looked through its own auto-shared items.
 
-- **Ingest worker,** a single writer per context. It takes inbox items and sweep transcripts and produces facts and relations in entity notes. It also dedupes, marks superseded facts, records disputes, recompiles `profile.md`, and makes a git commit per batch.
-- **Judge interface** with three question types (Noul, Choice, Score), plus:
-  - **Jev provider** (recommended)
-  - **LLM provider** (OpenAI-compatible and Anthropic, structured output)
-  - provider and thresholds configurable **per judgment**.
-- **Judgments wired in:**
-  - durable-fact gate
-  - context and entity routing
-  - duplicate and entity matching
-  - supersede or contradict
-  - **private or shareable**
-- **Review queue:** `review/` in each vault, plus a simple web view, for decisions between the thresholds.
-- **Capture:** `remember` (scoop), transcript sweep where the harness exposes it, and session-start hooks.
-- **Security controls:** secret scanning on writes, write allowlists per context, provenance framing in `recall` output, and audit export.
+## Phase 3: Ways in and the organisation (5–6 weeks)
+
+- **Documents and meeting notes:**
+  - upload in the web UI;
+  - a drop folder per context;
+  - connected folders per group (e.g. a Drive folder where meeting transcripts land);
+  - speaker attribution for meeting notes where the transcript provides it.
+- **Slack:**
+  - an internal Slack app recipe, installed by each deployment in its own workspace;
+  - channel-to-group mapping by inviting the app;
+  - message-level authorship, so senders can retract.
+- **End-of-session sweep,** opt-in per person.
+- **Group maintenance:** entity matching, dedupe with co-asserters, supersede and dispute, all with conservative defaults; a profile compiler; a lint report.
+- **Decision-model interface, complete:**
+  - adapters: `decision-api` (Jev default, Clef hosted or self-hosted), `llm`, `classifier` and `rules`;
+  - routing per judgment, with fallbacks;
+  - a calibration step fitted from labels.
+- **Author control, complete:**
+  - retractions remove the fact from the group vault and index immediately;
+  - git history is compacted after a configurable window;
+  - retracting a fact that is also asserted by someone else keeps it under their name.
+- **Security controls:**
+  - secret scanning that refuses credentials;
+  - a write list per group;
+  - provenance framing in `recall` output;
+  - audit export;
+  - the external-processor declaration in config.
 - **Organisation profile recipe:**
-  - OIDC to the org's identity provider, with IdP groups mapped to contexts
-  - one git repository per context
-  - a container deployment (Helm)
-  - backups, retention settings, and a documented erasure procedure.
-- **Pilot:** one or two volunteer teams in the sponsoring organisation, each with a team context plus personal contexts, for at least two weeks.
+  - OIDC with IdP groups mapped to group brains;
+  - a git repository per group;
+  - Helm;
+  - backups and retention;
+  - documentation of the encryption guarantees and the compliance trade-off for legal review.
+- **Pilot:** one or two volunteer teams for at least three weeks, with their Slack channels and meeting folders connected.
 
 ### Gate 2: pilot review
 
 | Measure | Proposed target |
 |---|---|
-| Cross-context leakage in access tests and the pilot | **Zero** (any leak blocks the release) |
-| Sensitive-write detection on the labelled set | ≥ 95% caught; misses reviewed one by one |
-| Ingest fact precision (sampled by hand) | ≥ 90% |
-| Duplicate detection (precision / recall) | ≥ 90% / ≥ 80% |
-| Review-queue load | Small enough that a context owner clears it in about 10 minutes a week |
-| Pilot answer accuracy on their private questions | At or above whole-context loading, at ≤ 15% of the tokens |
-| Pilot users | Would keep using it (a short survey); can fix a wrong fact without engineering help |
+| Sensitive or personal items reaching a group | **Zero** found in an audit of all auto-shared items (any leak blocks the release) |
+| Auto-shared items later retracted | ≤ 2% |
+| Consent prompts per person per week | ≤ 5 after the second week |
+| Group brain growth | Pilot teams' brains answer their private question set at or above whole-context loading, at ≤ 15% of the tokens |
+| Cross-context leakage in access tests and the pilot | **Zero** |
+| Pilot users | Would keep using it (a short survey); trust what is shared on their behalf; can fix or retract without help |
 
 ## Phase 4: Tuning and public release (3–4 weeks)
 
-- **Judge bake-off:** Jev, the LLM provider and a local small model on every judgment, on the public eval set. Measure accuracy, calibration, latency and cost per 1,000 writes. Publish the results and set the recommended defaults per profile from them.
-- **Retrieval tuning,** adopted only where the eval set shows a gain:
-  - reranking (Jev against a local cross-encoder)
-  - entity matching in `recall`
-  - summary layers per folder.
-- **Community profile:** Docker Compose, a quick-start guide, an example vault template, and LLM-judge defaults so no proprietary service is needed.
-- **Security review** of the gateway and the organisation profile, by the sponsoring organisation's security team.
-- **Release v0.1:** docs site, changelog, the published eval results, and the issue templates.
+- **Decision-model bake-off:** Jev, Clef (hosted and self-hosted) and an LLM on every judgment.
+  - **Test data:** the public sets plus the anonymised pilot labels.
+  - **Measures:** accuracy, calibration, latency and cost per 1,000 items.
+  - **Outcome:** publish the results and confirm the default (Jev unless the results say otherwise) and the recommended routing per hosting profile.
+- **Recalibrate thresholds** from pilot consent and retraction labels.
+- **Retrieval tuning,** adopted only where the test set shows a gain: reranking (decision model vs a local cross-encoder), entity matching in `recall`, and summary layers.
+- **Stretch goals:**
+  - an Obsidian sync client that decrypts personal brains on the person's device;
+  - a confidential-computing deployment guide.
+- **Community profile:** Docker Compose, a quick-start guide and an example vault and policy template.
+- **Security review** of the gateway, the encryption and the organisation profile.
+- **Release v0.1:** docs site, changelog, published test results and issue templates.
 
 ## Repository layout (proposed)
 
 ```
 context-brain/
-  docs/            decision.md, plan.md, adr/, guides/ (clients, hosting profiles)
-  spec/            note format and tool contract (versioned)
+  docs/            decision.md, plan.md, adr/, guides/ (clients, hosting profiles, encryption)
+  spec/            note format, tool contract, decision-model contract (versioned)
   gateway/         MCP server: auth, ACL, tools, budget packer, audit, storage adapter
-  ingest/          ingest worker, lint, profile compiler
-  judges/          interface + providers: jev/, llm/, local/
+  keys/            personal key management: wrapping, unlock, recovery
+  ingest/          pipeline, classifier, group maintenance, lint, profile compiler
+  sources/         documents, meeting notes, Slack, sweep
+  decision/        decision-model interface + adapters: decision_api/ (Jev, Clef), llm/, classifier/, rules/
+  web/             web UI
   deploy/          personal/, compose/, helm/
-  eval/            public synthetic dataset, harness, published results
-  examples/        vault template with AGENTS.md conventions
+  eval/            public test sets, harness, published results
+  examples/        vault and policy templates
 ```
 
-The implementation language is open for review. The proposal is Python, to match Basic Memory and the MCP and ML tooling around it.
+The implementation language is open for review. The proposal is Python for the gateway and pipeline, to match Basic Memory and the MCP and ML tooling around it, and TypeScript for the web UI.
 
 ## What we need from reviewers and the organisation
 
 - **Engineering leaders:** challenge the decision ([questions](decision.md#13-questions-for-reviewers)), the gate criteria and the estimates.
-- **People:** two engineers for about 3–4 months, and a part-time security reviewer from phase 3.
-- **Pilot:** one or two volunteer teams for phase 3.
-- **Approvals:** the open-source policy owner (license, publishing under the org), and data protection (Jev and LLM providers as processors for the organisation profile).
-- **Budget:** small. It covers hosting for the pilot, judge and LLM usage during evaluation, and trial seats of the managed options for Gate 1.
+- **People:**
+  - two engineers for about 4–5 months;
+  - a part-time security engineer from phase 2 (encryption, threat model, review).
+- **Pilot:** one or two volunteer teams for phase 3, with permission to connect their Slack channels and meeting folders.
+- **Approvals:**
+  - the open-source policy owner: license, and publishing under the org;
+  - data protection: the decision model and LLM as processors;
+  - legal: operator-blind personal brains and the compliance trade-off;
+  - the Slack workspace admin: the internal app.
+- **Budget:** small. It covers hosting for the pilot, decision-model and LLM usage during evaluation, and a GPU for the self-hosted Clef comparison.
