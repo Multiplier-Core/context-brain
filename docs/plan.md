@@ -56,7 +56,7 @@ That is about 3–4 months in total to a public v0.1, with a decision point afte
 | Load the whole vault | Accuracy ceiling and token cost to beat |
 | Basic Memory search + section reads, as is | What the engine gives for free |
 | Fact-first budgeted recall (ours) at 500 / 1,500 / 3,000 tokens | Whether our layer earns its keep |
-| Basic Memory Cloud/Teams, Supermemory, Shifu (where they can load the data) | The adopt-instead options |
+| Basic Memory Cloud/Teams, Supermemory (where they can load the data) | The adopt-instead options |
 
 **Verify:**
 - Deleting or editing a note in Obsidian is reflected in search. If not, design the reconcile job.

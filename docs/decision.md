@@ -145,7 +145,6 @@ Key: ● meets · ◐ partly or needs work · ○ no · ? unknown
 | flow (Facets) | OSS (MIT), alpha | ○ single user | ◐ Claude Code/Codex | ◐ | ◐ terminal | ◐ | ● | ◐ scoop + sweep | ● local | Borrow capture ideas |
 | Outline / Docmost | Self-hosted wiki + MCP | ● | ● | ◐ page-level | ● | ● permissions | ◐ DB storage | ○ | ● | Alternative UI |
 | Supermemory | Commercial | ● spaces | ● MCP + extension | ◐ vendor claims | ◐ web app | ● | ○ closed | ● | ◐ | Best managed product |
-| Shifu (useshifu.com) | Commercial beta, engineering focus | ◐ group context | ◐ coding tools + MCP | ● distilled decisions | ? | ? | ○ hosted | ● distils records | ◐ manual deletion | Candidate source/connector |
 | MemoryPlugin, Plurality Context Flow | Commercial | ◐ | ● many platforms | ◐ | ◐ | ● | ○/◐ | ◐ | ◐ | Not for orgs |
 | Notion MCP + memory | Commercial | ◐ memories per user | ◐ | ◐ | ● | ● | ◐ proprietary | ◐ | ◐ | Only if already on Notion |
 | Vendor-native memory (Claude, ChatGPT) | Built in | ◐ | ○ one vendor | ◐ | ◐ | ◐ | ○ | ◐ | ◐ | Stopgap only |
@@ -163,7 +162,6 @@ Key: ● meets · ◐ partly or needs work · ○ no · ? unknown
 | **A. Open source + thin build (chosen)** | A gateway, an ingest pipeline and deploy recipes | All, once built | We own security and uptime; extraction quality is on us | None: markdown in git |
 | B. Basic Memory Cloud/Teams | Near zero | R1–R5; R6 partly | Pricing and plan changes; a single vendor | Low: same files |
 | C. Supermemory | Near zero | R1, R2, R5; R3/R4 partly | Closed engine; export unclear | High |
-| D. Shifu | Near zero | R3, R7; others partly or unknown | Engineering-focused beta; hosted only | High until there's an export |
 
 A is the only direction that meets every must-have while keeping the data in the owner's hands. B uses the same files, so starting with A never closes off B.
 
@@ -179,7 +177,7 @@ A is the only direction that meets every must-have while keeping the data in the
    - **Jev is the recommended provider.**
    - An LLM provider and a local-model provider ship too.
    - Deployments choose a provider per judgment.
-5. **Go/no-go gate** after phase 1: compare against B, C and D on the same evaluation set before building beyond the prototype.
+5. **Go/no-go gate** after phase 1: compare against B and C on the same evaluation set before building beyond the prototype.
 
 ## 7. Architecture
 
@@ -318,7 +316,7 @@ Thresholds are calibrated on labelled examples from the evaluation set, because 
   - a million writes is then about **$420** in judge cost.
   - Real cost depends on prompt size and is measured in phase 3.
 - **Speed and consistency:** a non-generative model avoids long generations and gives the same kind of answer every time. That matters once an organisation's ingest volume is in the thousands of writes a day.
-- **Already proven next to this problem:** TypeSafe publishes memory, rerank and entity-alignment cookbooks, and Shifu uses Jev for relevance judgments.
+- **Documented for this problem:** TypeSafe publishes memory, rerank and entity-alignment cookbooks.
 
 **Why it is not a hard dependency:**
 - Jev is **hosted only**, with no open weights. It has been in **early access since September 2026**, so versions change often.
@@ -398,8 +396,7 @@ The same container image and configuration schema serve every profile. What chan
 
 ## 12. What would change this decision
 
-- **Phase 1 results.** If a managed option (B, C or D) matches our prototype on accuracy and tokens, and meets R4–R6 well enough for the sponsoring organisation, we would adopt it and keep this repository as the format, eval set and recipes only.
-- **Shifu.** If Shifu gains an export, an editable UI and non-engineering contexts, it becomes a strong candidate, either as a source the ingest pipeline reads or as the engineering context itself.
+- **Phase 1 results.** If a managed option (B or C) matches our prototype on accuracy and tokens, and meets R4–R6 well enough for the sponsoring organisation, we would adopt it and keep this repository as the format, eval set and recipes only.
 - **Hindsight.** If Hindsight gains human-editable storage, it could replace Basic Memory as the engine behind the storage adapter.
 
 ## 13. Questions for reviewers
@@ -426,7 +423,6 @@ The same container image and configuration schema serve every profile. What chan
 - [Hindsight](https://github.com/vectorize-io/hindsight), [Graphiti](https://github.com/getzep/graphiti), [Cognee](https://github.com/topoteretes/cognee), [Mem0](https://github.com/mem0ai/mem0), [HippoRAG](https://github.com/osu-nlp-group/hipporag), [qmd](https://github.com/tobi/qmd), [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service), [Memlord](https://github.com/MyrikLD/memlord), [flow](https://github.com/Facets-cloud/flow)
 - LLM-wiki implementations: [nashsu/llm_wiki](https://github.com/nashsu/llm_wiki), [lucasastorian/llmwiki](https://github.com/lucasastorian/llmwiki)
 - Jev / TypeSafe: [docs](https://docs.typesafe.ai/introduction), [OpenRouter overview](https://openrouter.ai/blog/insights/what-is-jev/), cookbooks for [memory](https://docs.typesafe.ai/cookbooks/basic_memory.md), [rerank](https://docs.typesafe.ai/cookbooks/rerank_typesafe.md) and [entity alignment](https://docs.typesafe.ai/cookbooks/entity_alignment.md)
-- [Shifu](https://useshifu.com), [Shifu data handling](https://useshifu.com/data)
 - [Supermemory](https://supermemory.ai/pricing), [Notion MCP](https://www.notion.com/help/notion-mcp)
 - Obsidian: [Sync collaboration](https://obsidian.md/help/sync/collaborate), [headless sync](https://obsidian.md/help/sync/headless)
 - Client support: [Claude custom connectors](https://support.claude.com/en/articles/11175166), [Gemini custom MCP apps](https://support.google.com/gemini/answer/17209137)
