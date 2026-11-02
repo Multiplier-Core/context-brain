@@ -23,7 +23,9 @@ context-brain is an open-source memory and context engine for AI assistants. Eve
 - **Capture as people work:**
   - AI assistants save durable facts during normal sessions;
   - documents and meeting notes are ingested;
-  - Slack channels connected to a group feed that group's brain.
+  - Slack channels connected to a group feed that group's brain;
+  - code repositories feed knowledge **about** the code (decisions, ownership, interfaces, conventions), kept in step with every merge.
+- **Bulk import** brings in what a team already knows (repositories, Notion pages, PDFs, document folders) in one run, so a group brain is useful from day one.
 - **Personal brains are private from the operator.** Each one is isolated and encrypted with keys only its owner controls, inside the central deployment.
 - **Fact-shaped markdown** in the open-source [Basic Memory](https://github.com/basicmachines-co/basic-memory) format, so models get small, attributed facts within a token budget, and people can read and edit the same files.
 - **A thin gateway** is the part this project builds. It is a remote MCP server with OAuth/OIDC, six small tools, the ingest and classification pipeline, and encryption.

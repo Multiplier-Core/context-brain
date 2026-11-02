@@ -2,7 +2,7 @@
 
 What we evaluate, how, and how far each part has got. The harness and test sets live in [eval/](../eval/); this page is the map. It follows [plan.md, Phase 0](plan.md#phase-0-foundations-12-weeks) and the gates in [plan.md](plan.md#gate-1-is-automatic-classification-trustworthy).
 
-> **Status (November 2026): pilot.** The classification and retrieval sets exist at about a quarter of their planned size. Extraction from sources, capture during AI sessions and group maintenance are not evaluated yet.
+> **Status (November 2026): pilot.** The classification and retrieval sets exist at about a quarter of their planned size. Extraction from sources (including code repositories and bulk imports), capture during AI sessions and group maintenance are not evaluated yet.
 
 ## What we are evaluating
 
@@ -11,10 +11,10 @@ Every way into the brain feeds one pipeline ([decision.md §7.2](decision.md#72-
 | Stage | The question it answers | Evaluated? |
 |---|---|---|
 | 1. Capture | Does the right material get picked up? The model calls `remember` at the right moments in a session; the end-of-session sweep finds what it missed. | **No** |
-| 2. Extraction | From a raw source (a Slack thread, meeting transcript, long document), are the right facts pulled out, with the right author? | **No** |
-| 3. Secret scan | Are credentials refused before anything is stored? | **Yes**, as part of classification |
+| 2. Extraction | From a raw source (a Slack thread, meeting transcript, long document, repository, merged PR, bulk import), are the right facts pulled out, with the right author? For bulk sources, does selective extraction beat indexing sections alone? | **No** |
+| 3. Secret scan | Are credentials refused before anything is stored? Repositories are where most of them live. | **Partly**: on single items, not on repository files |
 | 4. Classification | Is each fact put in the right category (group, ask, private, refused, drop) and the right group? | **Yes** |
-| 5. Group maintenance | Are duplicates merged, superseded facts marked and disputes recorded? | **No** |
+| 5. Group maintenance | Are duplicates merged, superseded facts marked and disputes recorded? Do facts about code follow the code as it changes, and do newer imported documents win over older ones? | **No** |
 | 6. Retrieval | Does `recall` return what answers the question, within the token budget? | **Partly**: offline check only |
 | 7. Access control | Does anything come back from a context the asker can't read? | **Yes**, on the retrieval set |
 
@@ -22,19 +22,22 @@ Encryption, logging and retraction are tested as code (unit and integration test
 
 ## Coverage by way in
 
-The ways in come from [decision.md §7.2](decision.md#72-ways-in-ingestion). Notion, Google Docs and similar arrive as **documents** (upload, drop folder or connected folder); there is no connector for them on their own.
+The ways in come from [decision.md §7.2](decision.md#72-ways-in-ingestion). Notion, PDFs and document folders arrive through **bulk import** ([§7.10](decision.md#710-bulk-import)) or as uploaded documents.
 
-| Way in | Capture | Extraction | Classification | Test form |
-|---|---|---|---|---|
-| AI saves as it works | Not started | Not needed: the model writes the fact | Done | `chat` |
-| "Remember this" (group named) | Not needed | Not needed | Done, thin (12 rows) | `remember` |
-| End-of-session sweep | Not started | Not started | Covered by `chat` once facts are out | — |
-| Slack channels | Not needed: the app reads every message | Not started | Done, one message at a time | `slack` |
-| Meeting notes | Not needed | Not started | Done, one statement at a time | `meeting` |
-| Documents (incl. Notion pages) | Not needed | Not started | Done, one passage at a time | `document` |
-| Direct edits, API and CLI | Not needed | Not needed | Secret scan only, not tested separately | — |
+| Way in | Capture | Extraction | Classification | Freshness | Test form |
+|---|---|---|---|---|---|
+| AI saves as it works (incl. coding sessions) | Not started | Not needed: the model writes the fact | Done; the repository hint for coding sessions isn't tested | — | `chat` |
+| "Remember this" (group named) | Not needed | Not needed | Done, thin (12 rows) | — | `remember` |
+| End-of-session sweep | Not started | Not started | Covered by `chat` once facts are out | — | — |
+| Slack channels | Not needed: the app reads every message | Not started | Done, one message at a time | — | `slack` |
+| Meeting notes | Not needed | Not started | Done, one statement at a time | — | `meeting` |
+| Documents | Not needed | Not started | Done, one passage at a time | — | `document` |
+| Code repositories: merged PRs | Not needed: the CI step sends every merge | Not started | Not started (no PR form yet) | Not started | — |
+| Code repositories: files | Not needed | Not started | Secret scan not tested on files | Not started | — |
+| Bulk import (repositories, Notion, PDFs, folders) | Not needed | Not started | Covered by the group-source forms once facts are out | Not started: older vs newer documents | — |
+| Direct edits, API and CLI | Not needed | Not needed | Secret scan only, not tested separately | — | — |
 
-"Done" for a group source means the classifier is tested on a statement that has already been cut out of the source. Turning a whole thread, transcript or document into those statements is the extraction stage, which isn't evaluated yet.
+"Done" for a group source means the classifier is tested on a statement that has already been cut out of the source. Turning a whole thread, transcript, document or repository into those statements is the extraction stage, which isn't evaluated yet. "Freshness" means facts follow their source as it changes.
 
 ## What is done
 
@@ -112,12 +115,16 @@ The retrieval numbers say little yet: the pilot vault is about 4k tokens, so the
 
 | Evaluation | What it would contain | What it would measure | Needed by |
 |---|---|---|---|
-| **Extraction from sources** | Raw Slack threads, meeting transcripts and long documents (including Notion-style pages with headings, tables and comments), each with the gold list of facts, their authors and their categories | Fact recall and precision against the gold list; author attribution (speakers in transcripts, senders in threads); leaks once the extracted facts are classified | Phase 3 |
+| **Extraction from sources** | Raw Slack threads, meeting transcripts and long documents, each with the gold list of facts, their authors and their categories | Fact recall and precision against the gold list; author attribution (speakers in transcripts, senders in threads); leaks once the extracted facts are classified | Phase 1 |
+| **Code set** | Three or four small fictional repositories for Tallowmere's services: READMEs, ADRs, `CODEOWNERS`, interface definitions, merged PR threads (some with remarks about people), fake secrets in the usual files, and a merge history that changes facts. Gold facts per repository, plus retrieval questions about the code. | Fact recall and precision; secrets refused; remarks about people filtered; after replaying the merge history, superseded facts marked and none left stale; answer accuracy on the code questions | Phase 1 |
+| **Import set** | A Notion-style export (pages with headings, tables and comments) and a folder of PDFs and Office files spanning several years, where older documents contradict newer ones | Index-only vs selective extraction vs extracting everything: answer accuracy, tokens, and cost per 1,000 documents; conflicts resolved in favour of the newer source; undo removes everything the import added | Phase 1 |
+| **Pull-request form** | A `pr` form for the classification items, like the Slack form | The category 3 filter on review threads | Phase 1 |
 | **Capture in AI sessions** | Session transcripts with the facts the model should have saved marked up, plus chatter it shouldn't save | Save recall, unwanted saves, leaks; the same transcripts test the end-of-session sweep | Phase 2 |
 | **Group maintenance** | Sequences of incoming facts against an existing vault | Duplicates merged, superseded facts marked with dates, disputes recorded rather than overwritten, no facts lost | Phase 3 |
 | **LLM-graded answers** | The existing questions, answered by a model from the returned context | Answer accuracy, with a sample checked by hand (Gate 1, criterion 5) | Phase 1 |
 | **Unanswerable questions** | Questions whose answer isn't in any readable context | Whether the answer says "not known" rather than guessing | Phase 1 |
 | **Deciding to recall** | Sessions where the model should, and shouldn't, call `recall` | Recall calls made when needed; wasted calls | Phase 2 |
+| **Repository hint** | Coding-session items with the repository's group as a hint, including personal remarks made while coding | The hint raises coverage without raising leaks | Phase 2 |
 | **Real token counts, tool-definition tokens, latency** | — | Measured once there is a gateway to call | Phase 1–2 |
 
 ### Gaps in the existing sets
@@ -139,7 +146,8 @@ The retrieval numbers say little yet: the pilot vault is about 4k tokens, so the
 | Gate 1.4: prompt rate ≤ 20% | Classification set, direct forms | Partly: too few category 2 rows |
 | Gate 1.5: retrieval within 5 points of the whole vault at ≤ 10% of its tokens | Retrieval set | No: needs LLM grading and the full-size vault |
 | Gate 1.6: encryption unlock time and memory | Encryption spike (Phase 1) | No |
-| Gate 2 | Pilot audit and the pilot's private sets | No: Phase 3 |
+| Extraction variants for repositories and bulk imports (not a gate; decides index-only or selective extraction) | Code and import sets | No: sets not built |
+| Gate 2, including stale code facts, secrets from repositories and import cost | Pilot audit and the pilot's private sets | No: Phase 3 |
 
 ## Private test sets
 

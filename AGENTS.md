@@ -35,7 +35,9 @@ These come from the decision doc. A change that weakens one of them needs an ADR
 **Access and safety:**
 - The gateway checks access on every call: the caller's own brain, plus the groups they belong to.
 - Credentials and secrets are refused at ingest; they are never stored.
-- Never ingest email, Slack direct messages, or workspace-wide crawls (decision.md §7.2).
+- Never ingest email, Slack direct messages, or workspace-wide crawls (decision.md §7.2). A bulk import is scoped by the person running it, using their own access; there is no organisation-wide import with an admin token.
+- Source code is never copied into a vault. Facts about code link to `repo@commit:path` (decision.md §7.9).
+- A repository or bulk import maps to one group, and must warn when members of that group can't read the source.
 
 **Boundaries in the code:**
 - Decision models are called only through the decision-model interface (`decision/`). No vendor SDK calls anywhere else.
@@ -66,6 +68,10 @@ When code needs one of these, use the default in the docs, keep it configurable 
 | Operator-blind personal brains vs organisation-held keys | Operator-blind, with org-held keys as a config option | decision.md §7.3, §9 |
 | Default decision model | Jev; personal-brain judgments routable to self-hosted Clef | decision.md §7.7 |
 | Project name | "context-brain" is a working name | decision.md §13 Q9 |
+| What the brain takes from code | Knowledge about the code, not the code | decision.md §7.9, §13 Q10 |
+| Imports into a group skip consent prompts | Yes; dry run, report and undo are the importer's control | decision.md §7.10, §13 Q11 |
+| Fact extraction for bulk sources | Index first, extract selectively; index-only if phase 1 shows no gain | decision.md §7.10, §12 |
+| How repositories connect | A CI step (GitHub Action first); a GitHub App as the alternative | decision.md §7.9 |
 
 ## Architecture decision records
 
