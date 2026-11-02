@@ -133,7 +133,7 @@ R1–R7 and R10 are must-haves. R8–R9 are strong preferences.
 ### 5.3 Human interface
 
 - **Obsidian is the best editor for markdown vaults,** but it has **no access control inside a vault**. So the unit of isolation is one vault per context, with the gateway enforcing access.
-- **A web UI is required anyway.** Personal brains are encrypted (§8.2), so most people will see "what I contributed, where it went, and why" in a web UI. Obsidian remains available for group contexts and for power users.
+- **A web UI is required anyway.** Personal brains are encrypted (§7.3), so most people will see "what I contributed, where it went, and why" in a web UI. Obsidian remains available for group contexts and for power users.
 
 ### 5.4 Client reach
 
