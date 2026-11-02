@@ -36,6 +36,7 @@ context-brain is an open-source memory and context engine for AI assistants. Eve
 |---|---|
 | [docs/decision.md](docs/decision.md) | The three-category principle, requirements, options evaluated, architecture (ingestion, encrypted personal brains, classification, decision models), hosting profiles, security, risks, and the questions for reviewers |
 | [docs/plan.md](docs/plan.md) | Phased delivery plan, go/no-go gates, the evaluation method, and the proposed repository layout |
+| [AGENTS.md](AGENTS.md) | Guide for contributors and AI coding agents: current status, rules that must not be broken, open decisions and conventions |
 
 ## How to review
 
