@@ -2,6 +2,8 @@
 
 Public test sets and the harness that measures context-brain against them ([plan.md, Phase 0](../docs/plan.md#phase-0-foundations-12-weeks)). Everything here is built around **Tallowmere**, a fictional organisation, so the sets can be published and reused by anyone.
 
+This page says how to run the harness. [docs/evaluation.md](../docs/evaluation.md) says what is evaluated at each stage of the pipeline, and what isn't yet.
+
 | Path | What it is |
 |---|---|
 | [tallowmere/](tallowmere/) | The fictional organisation: people, groups, group policies and vaults of notes |
@@ -62,6 +64,8 @@ The harness checks every hit against the organisation itself, so a retriever tha
 | `bm25-facts` | The same over single fact lines, closer to the fact-first `recall` |
 
 ## Not done yet
+
+The harness gaps are below. The missing evaluations (extraction from sources, capture in AI sessions, group maintenance) are listed in [docs/evaluation.md](../docs/evaluation.md#what-is-not-done).
 
 - **LLM-graded answer accuracy.** The plan grades answers with an LLM and checks a sample by hand. The offline "answerable" check comes first because it needs no API key.
 - **Real token counts.** Tokens are approximated at four characters per token.
