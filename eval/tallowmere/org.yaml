@@ -1,0 +1,51 @@
+# Tallowmere: the fictional organisation behind the public test sets.
+# Every person, group, service and event here is invented.
+
+organisation: tallowmere
+
+people:
+  alice:
+    role: Staff engineer, payments tech lead
+    groups: [team-payments, org-handbook]
+  bob:
+    role: Backend engineer
+    groups: [team-payments, org-handbook]
+  carol:
+    role: Site reliability engineer
+    groups: [team-platform, org-handbook]
+  dave:
+    role: Platform engineer
+    groups: [team-platform, org-handbook]
+  erin:
+    role: Product manager, growth
+    groups: [team-growth, org-handbook]
+  frank:
+    role: Product designer
+    groups: [team-growth, org-handbook]
+  grace:
+    role: Head of engineering
+    groups: [team-payments, team-platform, org-handbook]
+  heidi:
+    role: People operations lead
+    groups: [org-handbook]
+  ivan:
+    role: Data analyst
+    groups: [team-growth, team-payments, org-handbook]
+  judy:
+    role: Customer support lead
+    groups: [team-payments, org-handbook]
+
+groups:
+  team-payments:
+    purpose: Checkout, payments, refunds and the ledger.
+    writers: members
+  team-platform:
+    purpose: Infrastructure, CI/CD, observability and on-call.
+    writers: members
+  team-growth:
+    purpose: Marketing site, experiments, analytics and campaigns.
+    writers: members
+  org-handbook:
+    purpose: Company-wide policies and how Tallowmere works.
+    # Everyone can read the handbook; only these people can write to it.
+    writers: [grace, heidi]
