@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft for engineering review |
-| **Date** | 2026-11-01 |
+| **Date** | 2026-11-01; updated 2026-11-02 to add source code and bulk import |
 | **Decision** | Build a thin open-source gateway and ingest pipeline on Basic Memory's markdown format. Every person gets an encrypted personal brain; group brains are filled automatically under a three-category sharing principle. Decisions are made by a pluggable decision model, Jev by default. |
 | **Delivery plan** | [plan.md](plan.md) |
 
@@ -23,7 +23,9 @@
 - **Capture as people work.** The main inputs are:
   - AI assistants saving durable facts during normal sessions;
   - documents and meeting notes people provide;
-  - Slack channels connected to a group.
+  - Slack channels connected to a group;
+  - code repositories: knowledge **about** the code (decisions, ownership, interfaces, conventions), kept in step with every merge. The code itself stays in the repository.
+- **Bulk import** brings in what an organisation already knows (repositories, Notion pages, PDFs, document folders) in one run, so a group brain doesn't start empty.
 - **Personal brains** are part of the central deployment but **isolated and encrypted with keys only the person controls**, so the operating organisation cannot read them at rest or in backups (§7.3 sets out exactly what is and isn't guaranteed).
 - **Build vs adopt:** we adopt **Basic Memory** (open source) as the storage format and engine, and build a **gateway** around it. The gateway provides:
   - identity, isolation and encryption
@@ -70,6 +72,7 @@ AI assistants now do real work, but the context they work from is fragmented:
 **Goals:**
 - One private brain per person and one shared brain per group, usable from any MCP-capable AI client.
 - Capture happens as a side effect of normal work, with no curation step.
+- Existing knowledge (repositories, wikis, documents) can be brought in at once, so a group brain is useful from its first day.
 - Models retrieve small, relevant, attributed facts within a stated token budget.
 - People own their contributions: they can read, edit, retract and export them.
 - It works for one person, a team, and an organisation of hundreds, without forking the code.
@@ -78,10 +81,11 @@ AI assistants now do real work, but the context they work from is fragmented:
 - A hosted multi-tenant SaaS. The design must not block one, but we are not building it.
 - A chat UI or agent framework. The brain is a service that other tools call.
 - Reading email, direct messages or whole-workspace data. Capture is limited to the channels in §7.
+- A code search engine. The brain holds knowledge about code; coding agents search the code itself in the repository.
 
 ## 4. Requirements
 
-R1–R7 and R10 are must-haves. R8–R9 are strong preferences.
+R1–R7, R10 and R11 are must-haves. R8–R9 are strong preferences.
 
 | # | Requirement | What "good" looks like |
 |---|---|---|
@@ -91,10 +95,11 @@ R1–R7 and R10 are must-haves. R8–R9 are strong preferences.
 | R4 | **Human interface** | People can browse, edit and retract what they contributed, and browse what their groups know, in a web UI or Obsidian. Edits and retractions reach the search index. |
 | R5 | **Isolated, selectable contexts** | Each person has a personal brain, plus group contexts such as `team-payments` or `org-handbook`. A session attaches one or several. Access is **enforced**, not tagged. |
 | R6 | **Open and portable** | Open-source code; data is plain markdown that can be exported. No required proprietary service. |
-| R7 | **Captures as people work** | AI sessions, provided documents, meeting notes and Slack channels feed the brain without a curation step. Duplicates are merged, and superseded or disputed facts are marked. |
+| R7 | **Captures as people work** | AI sessions, provided documents, meeting notes, Slack channels and code repositories feed the brain without a curation step. Duplicates are merged, and superseded or disputed facts are marked. Facts about code follow the code as it changes. |
 | R8 | **Three-category sharing** | Every item is classified as group, uncertain or private (§2). Group items flow automatically, uncertain ones need consent, and private ones never move. Sensitive data never reaches a group. |
 | R9 | **Deployable at three scales** | Personal, organisation and community deployments from the same code, differing only in configuration. |
 | R10 | **Personal brains are private from the operator** | Personal brains are encrypted with keys only the person controls; the organisation cannot read them at rest or in backups. |
+| R11 | **Imports existing knowledge** | A group writer can import repositories, Notion pages, PDFs or a document folder into a group in one run. The cost is estimated first, the run can be resumed, and the whole import can be undone. Re-running it picks up changes. |
 
 ## 5. What the research says
 
@@ -163,7 +168,7 @@ All performance figures are each vendor's own **(unverified)**. Because both sha
 
 ## 6. Options compared
 
-Key: ● meets · ◐ partly or needs work · ○ no · ? unknown. None of the existing options meets R8 or R10, so those columns are left out of the table.
+Key: ● meets · ◐ partly or needs work · ○ no · ? unknown. None of the existing options meets R8 or R10, so those columns are left out of the table. R11 (bulk import) was added after this comparison and isn't scored.
 
 | Option | Kind | R1 Group | R2 Any AI | R3 Tokens | R4 Human UI | R5 Contexts | R6 Open | R7 Capture | Verdict |
 |---|---|---|---|---|---|---|---|---|---|
@@ -210,6 +215,8 @@ flowchart TB
     S1[AI sessions:<br/>remember + end-of-session sweep]
     S2[Documents & meeting notes<br/>upload, drop folder, connected folder]
     S3[Slack channels<br/>internal app, mapped to a group]
+    S4[Code repositories<br/>CI step on merge, mapped to a group]
+    S5[Bulk import<br/>repos · Notion · PDFs · folders]
   end
 
   subgraph Gateway["context-brain gateway (this project)"]
@@ -221,7 +228,7 @@ flowchart TB
 
   subgraph Pipeline["Ingest & classification"]
     SCAN[Secret scan<br/>secrets refused]
-    EXT[Extract facts<br/>LLM]
+    EXT[Keep source, index sections<br/>extract facts: LLM, selective for bulk]
     CLS{{Three-category classifier<br/>rules → decision model → thresholds}}
     MAINT[Maintain group facts<br/>dedupe · supersede · dispute]
   end
@@ -259,12 +266,14 @@ flowchart TB
 | **AI saves as it works** ("scoop") | The model calls `remember` whenever a durable fact comes up: a decision, constraint, preference, owner or change. The client instruction or hook tells it to do this proactively. Each save returns a short receipt the model can show. | **Primary** | Yes |
 | **Documents and meeting notes** | Upload in the web UI, drop into a context's `raw/` folder, or connect a folder (e.g. a Drive folder where meeting transcripts land). Facts are extracted and the source is kept, so answers can cite it. | **Primary** | Yes for uploads; connected folders are switched on per group |
 | **Slack channels** | The deployment's internal Slack app reads the channels it is **invited to**. Each channel maps to one group context. | **Primary** | Per channel, switched on by inviting the app |
+| **Code repositories** | Each repository maps to one group. A CI step posts every merge to the default branch: the merged PR and the changed files. Facts about the code (decisions, ownership, interfaces, conventions) are kept in step with it; the code itself is not copied (§7.9). Connecting a repository starts with a bulk import. | **Primary** | Per repository, connected by a writer of the group |
+| **Bulk import** | A writer of a group imports existing knowledge into it in one run: repositories, a Notion teamspace, a folder of PDFs or Office files, a Drive folder. Dry run with a cost estimate, then a resumable batch job that can be undone as a whole (§7.10). | **Primary** | Run on demand |
 | **"Remember this"** | The person asks explicitly, optionally naming a group ("remember for team-payments"). | Supporting | Yes |
 | **End-of-session sweep** | When a session ends, the transcript is re-read for facts the model didn't save. This works where the harness exposes it (e.g. Claude Code hooks); elsewhere the person uploads it. | Supporting | Per person, opt-in |
 | **Direct edits** | Edits in the web UI, in Obsidian (group contexts) or in git. Treated as authoritative; only the secret scan runs. | Supporting | Yes |
 | **API and CLI** | For automation, such as a build pipeline posting release notes. Uses a service identity limited to one group. | Supporting | No, needs a key |
 
-**Never ingested:** email, Slack direct messages and private channels the app isn't invited to, anything from a workspace-wide crawl, and AI chat histories the person didn't send.
+**Never ingested:** email, Slack direct messages and private channels the app isn't invited to, anything from a workspace-wide crawl, and AI chat histories the person didn't send. A bulk import is not a crawl: a person picks the sources and the target group, using their own access. There is no organisation-wide import with an admin token.
 
 **Who is the author** decides which personal brain an item belongs to, and who can retract it:
 
@@ -274,9 +283,14 @@ flowchart TB
 | Uploaded document | The uploader |
 | Meeting notes | The person who uploaded or connected them. Statements attributed to a speaker in the notes are also tagged with that speaker, who can retract them. |
 | Slack message | The message's sender |
+| Merged pull request | The PR's author. Statements in review threads are also tagged with the reviewer who made them, who can retract them. |
+| Facts taken from files in a repository | The person who connected the repository |
+| Bulk import | The person who ran it |
 | API | The service identity, owned by the group |
 
-**Group sources are handled slightly differently.** Slack channels, meeting folders connected to a group, and documents dropped into a group context already have a defined audience: that group. For these, the classifier doesn't ask whether something is group or personal. It only removes **category 3** content (sensitive or personal) and noise. Category 3 content from a group source is **discarded**, not stored in anyone's personal brain.
+Git identities are matched to people by email. Commits and PRs from identities that don't match anyone are attributed to the group's service identity.
+
+**Group sources are handled slightly differently.** Slack channels, meeting folders connected to a group, documents dropped into a group context, repositories connected to a group and bulk imports into a group already have a defined audience: that group. For these, the classifier doesn't ask whether something is group or personal. It only removes **category 3** content (sensitive or personal) and noise. Category 3 content from a group source is **discarded**, not stored in anyone's personal brain.
 
 ### 7.3 Personal brains: isolation and encryption
 
@@ -315,10 +329,12 @@ Every person gets a personal brain inside the central deployment. It is fully is
   policy.md        # purpose, scope, examples in and out (used by the classifier)
   profile.md       # ~500-token always-loaded summary, compiled by ingest
   index.md, log.md # Karpathy-style index and change log
-  raw/             # sources: documents, meeting notes, Slack digests
+  raw/             # sources: documents, meeting notes, Slack digests, PR digests, imported pages
   inbox/           # items awaiting ingest
-  wiki/            # entity notes: people, services, projects, decisions
+  wiki/            # entity notes: people, services, repositories, projects, decisions
 ```
+
+Source code is never copied into a vault. Facts taken from a repository link to it as `repo@commit:path`, so a reader (or a model) can open the exact version the fact came from.
 
 An entity note (illustrative; the exact attribution syntax is fixed in phase 1 so it stays valid Basic Memory):
 
@@ -333,6 +349,8 @@ Public API for creating and tracking orders. Owned by the payments team.
 ## Facts
 - [constraint] Idempotency keys expire after 24 hours #api (by: alice · src: [[raw/2026-10-12-design-review#Retries]] · from: 2026-10-12 · cat: 1/rule:group-source)
 - [decision] Pagination is cursor-based; offset pagination is deprecated (by: bob · from: 2026-09-01 · cat: 1/rubric 0.96)
+- [convention] Every public endpoint needs an idempotency test (by: alice · src: orders-api#412 · from: 2026-10-20 · cat: 1/rule:group-source)
+- [interface] `POST /orders` returns 409 when an idempotency key is reused (by: carol · src: orders-api@3f9c2e1:api/openapi.yaml · from: 2026-10-20 · cat: 1/rule:group-source)
 
 ## Relations
 - owned_by [[Payments Team]]
@@ -342,7 +360,7 @@ Public API for creating and tracking orders. Owned by the payments team.
 - [sla] p99 latency target is 300 ms (by: carol) vs 500 ms (by: dave)
 ```
 
-Every fact records its author, source, valid-from/to dates, and **why it was shared** (the rule, or the rubric score). Conflicting claims are recorded under `## Disputed`, with both attributed, rather than one overwriting the other.
+Every fact records its author, source, valid-from/to dates, and **why it was shared** (the rule, or the rubric score). `orders-api#412` stands for a merged pull request; its digest sits in `raw/`. Conflicting claims are recorded under `## Disputed`, with both attributed, rather than one overwriting the other.
 
 ### 7.5 Model-facing tools
 
@@ -381,7 +399,7 @@ The classifier runs on every item and implements §2 in four layers.
   - topics on the person's own "always private" list.
 - **Forced category 1, subject to the category 3 rules:**
   - the person explicitly addressed a group ("remember for team-payments");
-  - the item came from a group source (§7.2);
+  - the item came from a group source (§7.2), including a connected repository or a bulk import into a group;
   - the item matches one of the person's own standing share rules;
   - the item matches the group's `policy.md` "always group" types (e.g. decisions about services the group owns).
 - **Order:** category 3 rules win over category 1 rules. If both fire, the person is told the item stayed private and why.
@@ -397,6 +415,8 @@ The classifier runs on every item and implements §2 in four layers.
 | Usefulness | How likely are other group members to need this in the next 3 months? (none / low / medium / high) | Score |
 | Durability | Will it still be true and useful in 30 days? | Probability |
 | Novelty | Does the group already know this? (asked against the top matching facts) | Probability |
+
+When an AI session runs inside a connected repository (a coding agent in a checkout), the repository's group is passed to the Scope question as a hint. It is only a hint: coding sessions mix in personal content, so they are judged like any other session, not treated as a group source.
 
 **Layer 3: mapping scores to a category,** using asymmetric thresholds. These are the proposed starting values, tuned per group.
 
@@ -482,6 +502,73 @@ Once an item is in category 1, the maintenance step decides how it lands. These 
 
 A scheduled lint pass reports orphans, stale facts and growing dispute lists for each group. It doesn't block anything.
 
+### 7.9 Source code repositories
+
+**The line:** the brain holds knowledge **about** code; the code stays in its repository. Coding agents already search the checkout in front of them, and a copy of the code would go stale with every commit. What they can't get from that checkout is knowledge that spans repositories, the reasons behind decisions, the team's conventions and what changed recently. That is what the brain takes.
+
+| From the repository | What the brain keeps |
+|---|---|
+| READMEs, `docs/`, ADRs | Indexed as sections in `raw/`; facts for decisions, constraints and how things behave |
+| Ownership files (`CODEOWNERS`) and manifests | Owners; dependencies between services and repositories |
+| Interface definitions (OpenAPI, protobuf and GraphQL schemas, public module boundaries) | Endpoints, contracts and who calls whom |
+| Agent and contributor guides (`AGENTS.md`, `CONTRIBUTING.md`), lint and format config | Conventions |
+| Merged pull requests: title, description, review threads | A digest in `raw/`; facts for decisions, trade-offs and gotchas |
+| Release notes and changelogs | What changed, and when |
+| Source files | **Not stored.** Read only to describe structure (modules, entry points) where the docs don't, and linked, never copied |
+
+**Not taken:** individual commits (squash-merged PRs carry their meaning), open PRs and branches (still changing), CI logs, and issues (a possible later source).
+
+**Keeping up with the code:**
+- Every fact from a repository records `repo@commit:path` (or `repo#pr`).
+- On each merge to the default branch, the CI step sends the merged PR and the changed paths. Facts from changed files are re-derived. Facts the new version no longer supports get a `to:` date (superseded), rather than being deleted silently.
+- A periodic full re-sync catches merges the CI step missed.
+
+**Access:**
+- A repository maps to one group. The person connecting it must be a writer of that group and able to read the repository.
+- Where the git host exposes it, the connector warns if some group members can't read the repository. A restricted repository should map only to a group whose members can all read it.
+
+**Secrets and people:**
+- Repositories are where secrets live, so the secret scan runs on every file and every PR text. Files that usually hold secrets (`.env`, key files, credential fixtures) are skipped by default.
+- Review threads are conversations, like Slack: claims about people and personal remarks are filtered out as category 3.
+
+**Delivery:**
+- **Default:** a CI step (e.g. a GitHub Action or GitLab CI job) that runs inside the organisation's own pipeline and posts to the brain's API with the group's service identity. It works with any git host and needs no central app with access to every repository. GitHub comes first.
+- **Alternative:** a GitHub App with webhooks, for organisations that prefer one installation.
+
+**Coding sessions** are a separate stream: they go through `remember` and the end-of-session sweep like any AI session, with the repository's group as a scope hint (§7.6).
+
+### 7.10 Bulk import
+
+A bulk import brings an existing body of knowledge into a brain in one run: repositories, a Notion teamspace (export or API), a folder of PDFs or Office files, a Drive folder.
+
+**Who can run one:**
+- A writer of a group, into that group, using their own access to the sources.
+- Anyone, into their own personal brain. That content stays private: no share prompts are raised for it.
+- Never an organisation-wide import with an admin token (§7.2).
+
+**How it runs:**
+
+| Step | What happens |
+|---|---|
+| 1. Choose | Sources and the target brain |
+| 2. Dry run | Documents found, estimated tokens and cost, and access warnings (group members who can't read a source) |
+| 3. Run | A batch job: rate-limited, resumable, and idempotent by content hash, so a rerun skips what hasn't changed |
+| 4. Report | Counts shared, discarded as private, refused as secrets, and dropped as noise. IDs and counts only, never content. |
+| 5. Undo | The whole import can be retracted by its batch ID, as well as fact by fact |
+
+**Index first, extract selectively.** Section retrieval over the original text is a strong baseline, and fact extraction adds cost and errors (§5.1). So every imported source is kept in `raw/` and indexed by section. Facts are extracted only from the parts most worth it: decisions, constraints, ownership, interfaces, how things behave. Everything else stays findable through section retrieval. Phase 1 measures whether this holds up ([plan](plan.md#phase-1-prototype-and-gate-45-weeks)).
+
+**Classification.** An import into a group is a group source: secret scan and the category 3 filter, no consent prompts. The importer is the author and vouches for the audience; the dry run, the report and undo are their control. This is the author controlling their own contribution, not a gatekeeper.
+
+**Old and new.** Imported knowledge spans years, and older documents contradict newer ones.
+- Each fact takes its valid-from date from the source's last-modified date.
+- When facts conflict, the newer source supersedes the older one (§7.8).
+- Sources older than a configurable age are listed in the import report and the lint report.
+
+**Keeping current:**
+- **Repositories** stay in sync on every merge (§7.9), so they never need a rerun.
+- **Everything else is a snapshot.** Rerunning the import picks up new and changed documents by hash, re-derives their facts, and supersedes facts from documents that were removed.
+
 ## 8. Hosting profiles
 
 The same container image and configuration schema serve every profile.
@@ -495,6 +582,8 @@ The same container image and configuration schema serve every profile.
 | Group brains | Optional | One git repository per group, on the org's git host | Local git |
 | Slack | Usually not needed | The org's own **internal** Slack app, invited to channels | Optional, as an internal app in their own workspace |
 | Meeting notes and documents | Upload or drop folder | Upload; connected folders per group (e.g. where meeting transcripts land) | Upload or drop folder |
+| Code repositories | A CI step, or a local import of a checkout | A CI step per repository, or a GitHub App | A CI step |
+| Bulk import | CLI or web UI | Web UI, run by group writers | CLI or web UI |
 | Decision model | Jev by default | Jev under a data-processing agreement, or self-hosted Clef, or the org's LLM, chosen per judgment | Jev by default; self-hosted Clef or an LLM for no external dependency |
 | Human UI | Obsidian or web | Web UI; Obsidian and git for group contexts | Web UI or Obsidian |
 
@@ -509,12 +598,13 @@ The same container image and configuration schema serve every profile.
   - `recall` output is framed as data, not instructions;
   - classification and secret scanning run on every write;
   - each group has a list of who may write to it.
-- **Secrets are refused at the door.** Credentials found by the scanner are never stored anywhere, personal brains included.
+- **Secrets are refused at the door.** Credentials found by the scanner are never stored anywhere, personal brains included. Repositories and bulk imports are the most likely places to meet them, so files that usually hold secrets are skipped before scanning.
+- **A source's audience must not be widened by mistake.** A repository or an import maps to a group, and the connector warns when some members of that group can't read the source.
 - **Retraction and erasure:**
   - A retraction removes the fact from the group vault and its index immediately.
   - **Git history still holds it.** Group repositories therefore get periodic history compaction: commits older than a configurable window are squashed, so retracted content is purged within that window.
   - Content already returned to someone's AI session can't be recalled. This is documented for users.
-- **External processors:** every outside service that sees content is declared in config, so a data-protection review can approve it. That covers the decision model, the LLM, embeddings and Slack.
+- **External processors:** every outside service that sees content is declared in config, so a data-protection review can approve it. That covers the decision model, the LLM, embeddings, Slack, the git host and any import source's API (e.g. Notion).
 - **Compliance tension:** some organisations need to access employee data on company systems, for e-discovery, legal hold or data-loss prevention. Encrypted personal brains deliberately prevent that. Each organisation's legal team must accept this before deploying, and some may need to disable personal brains or switch to organisation-held keys. That would be a separate, clearly labelled configuration.
 - **Audit:** every tool call is logged with its identity, contexts, token count and the IDs returned (not the content). Personal-brain calls log only that a call happened.
 
@@ -531,8 +621,13 @@ The same container image and configuration schema serve every profile.
 |---|---|---|---|
 | Auto-sharing puts something personal into a group | Medium | **High** | Fixed rules first; asymmetric thresholds; retraction any time; zero-leak target on the test set before launch |
 | Too many consent prompts, so people ignore them | Medium | High | Standing rules learned from answers; batched digests; prompts per person tracked as a metric |
-| Too few items shared, so group brains stay empty | Medium | High | Group sources (Slack, meeting folders) bypass the personal/group question; per-group threshold tuning |
+| Too few items shared, so group brains stay empty | Medium | High | Group sources (Slack, meeting folders, repositories) bypass the personal/group question; bulk import fills a brain on day one; per-group threshold tuning |
 | Fact extraction introduces errors that spread | Medium | High | Sources kept alongside facts; attribution; disputes recorded rather than overwritten; lint |
+| Facts about code go stale as the code changes | High | Medium | Every fact pinned to a commit; re-derived on each merge; periodic full re-sync |
+| A bulk import floods a group brain with outdated or low-value facts | Medium | Medium | Index first, extract selectively; dates from the source; newer sources supersede older ones; undo by batch |
+| A bulk import is expensive | Medium | Medium | Dry-run cost estimate; selective extraction; idempotent reruns |
+| A repository or import reaches group members who couldn't read the source | Medium | High | One group per source; connector checks access where the host exposes it; restricted repositories map to restricted groups |
+| Secrets in repositories reach a brain | Medium | High | Secret-prone files skipped; scanner on every file and PR text; refused items never stored |
 | Personal-brain key loss | Medium | Medium | Recovery key at enrolment; clear warnings; export |
 | Operator compromise of the running server | Low | High | Open-source code, reproducible builds, optional confidential computing |
 | Legal teams reject operator-blind personal brains | Medium | Medium | Organisation-held-key mode as an explicit alternative; documented trade-off |
@@ -545,6 +640,7 @@ The same container image and configuration schema serve every profile.
 
 - **The classifier can't reach the targets.** If phase 1 shows the three-category classifier can't reach zero leaks with a useful share rate, the automatic flow doesn't work. We would then reduce category 1 to fixed rules only (explicit addressing and group sources) and route everything else through consent.
 - **A managed product appears** that offers person-held encryption and policy-based sharing. We would then adopt it and keep this repository as the format, the classifier test suite and the recipes.
+- **Extracting facts from bulk sources doesn't beat section retrieval.** If phase 1 shows no gain, bulk imports and repositories become index-only, with facts extracted only from merged PRs and ADRs.
 - **Hindsight gains human-editable storage.** It could then replace Basic Memory behind the storage adapter.
 
 ## 13. Questions for reviewers
@@ -554,10 +650,12 @@ The same container image and configuration schema serve every profile.
 3. **Operator-blind personal brains.** Is the guarantee in §7.3 strong enough, and is the compliance trade-off in §9 acceptable? Should confidential computing be required, or optional?
 4. **Engine instance per person.** Is one engine instance per unlocked personal brain acceptable, or should we design a shared engine with per-person encrypted indexes from the start?
 5. **Jev as the default decision model,** with personal-brain judgments routable to self-hosted Clef. What would legal or security need to approve that default?
-6. **Group sources.** Is it right that Slack channels and group meeting folders skip the personal/group question and only filter out category 3?
+6. **Group sources.** Is it right that Slack channels, group meeting folders, connected repositories and imports into a group skip the personal/group question and only filter out category 3?
 7. **Git per group** with periodic history compaction for retraction: right, or should group brains use a different store?
 8. **Licensing.** Apache-2.0 for our code, with Basic Memory kept as a separate AGPL process: any objections?
 9. **Name.** "context-brain" is a working name.
+10. **Source code.** Is "knowledge about the code, not the code" the right line (§7.9)? Are sources missing that your teams rely on, such as issues or incident reports?
+11. **Bulk import.** Is it right that an import into a group skips consent prompts because the importer vouches for the audience, with the dry run, report and undo as their control (§7.10)?
 
 ## 14. Sources
 
